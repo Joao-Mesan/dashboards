@@ -6,7 +6,7 @@
 (function () {
 'use strict';
 
-var VERSION = '1.1.0';
+var VERSION = '1.1.1';
 var D = window.DASH || {};
 var ROOT = document.getElementById(D.elemento || 'dash');
 if (!ROOT) return;
@@ -184,7 +184,7 @@ function csvRows(text, delim) {
 }
 
 /* ============================== MAPA DE COLUNAS ============================== */
-var NOT_COST = /custo|cost|costo|por |\bper\b|\/|cpc|cpm|ctr|taxa|tasa|rate/;
+var NOT_COST = /custo|cost|costo|\bcpc\b|\bcpm\b|\bctr\b|taxa|tasa|\brate\b|\/ /;
 var RULES = {
   date: { exact: ['dia', 'data', 'fecha', 'day', 'date', 'data real', 'created time', 'created_time', 'data de cadastro', 'data de inscricao', 'timestamp', 'horario de envio', 'submitted at'], re: [/^(dia|data|fecha|date|day)\b/, /created|timestamp|cadastro|inscri|envio/], not: [/atualiz|nascim/] },
   campaign: { exact: ['campanha', 'nome da campanha', 'campana', 'nombre de la campana', 'campaign', 'campaign name'], re: [/campanha|campana|campaign/], not: [/^id|\bid\b|tipo|objetiv|objective|status|estado|orcamento|budget/] },
@@ -198,7 +198,7 @@ var RULES = {
   reach: { exact: ['alcance', 'reach'], re: [/^alcance/, /^reach/], not: [/custo|cost|costo|por /] },
   frequency: { exact: ['frequencia', 'frecuencia', 'frequency'], re: [/^frequen|^frecuen/] },
   lpv: { exact: ['visualizacoes da pagina de destino', 'visualizaciones de la pagina de destino', 'landing page views'], re: [/pagina de destino|landing page view/], not: [NOT_COST] },
-  conversations: { exact: ['conversas por mensagem iniciadas', 'conversas iniciadas por mensagem', 'conversas iniciadas', 'messaging conversations started', 'conversaciones con mensajes iniciadas'], re: [/conversa|mensag|messaging conv/], not: [NOT_COST] },
+  conversations: { exact: ['conversas por mensagem iniciadas', 'conversas por mensagens iniciadas', 'conversas iniciadas por mensagem', 'conversas iniciadas por mensagens', 'conversas iniciadas', 'conversas', 'messaging conversations started', 'messaging conversation started', 'conversations started', 'conversaciones con mensajes iniciadas', 'conversaciones iniciadas'], re: [/conversa|mensag|messaging conv/], not: [NOT_COST] },
   leads: { exact: ['leads', 'lead', 'cadastros', 'leads de formulario', 'leads no formulario', 'form leads', 'clientes potenciales', 'registros'], re: [/^leads?\b/, /cadastro/, /clientes? potencial/], not: [NOT_COST, /qualific|conversa|mensag/] },
   purchases: { exact: ['compras', 'purchases', 'conversoes', 'conversiones', 'conversions', 'conv.'], re: [/^compras$/, /^purchases$/, /^conversoes$/, /^conversiones$/, /^conversions$/, /^conv\.?$/], not: [NOT_COST, /valor|value|vista|view/] },
   revenue: { exact: ['valor conv', 'valor conv.', 'valor de conversao', 'valor de conversao da compra', 'valor de conversion de compras', 'conversion value', 'purchase conversion value', 'receita'], re: [/valor (de )?conv/, /conversion value/, /^receita$/], not: [/carrinho|carrito|cart|finaliza|checkout|\/ ?cust|\/ ?cost|por cust|pagina|page/] },
@@ -258,10 +258,18 @@ function funnelFromText(t) {
   if (!n) return null;
   if (/whats|wpp|\bzap\b|mensag|messag|conversa|direct|\bdm\b|\bmsg\b/.test(n)) return 'whatsapp';
   if (/lead|cadastro|formul|potencial|registro|captac/.test(n)) return 'cadastro';
-  if (/sales|venda|ventas|compra|catalog|shopping|pmax|performance max|ecommerce|e-commerce|conversion|conversao|conversiones/.test(n)) return 'vendas';
-  if (/traffic|trafego|trafico|\bsite\b|landing|visita/.test(n)) return 'trafego';
-  if (/engag|engaj|interac|awareness|reconhec|alcance|reach|video|view|seguidor|perfil|brand|marca|branding/.test(n)) return 'outros';
+  if (/engag|engaj|interac|awareness|reconhec|alcance|reach|video|view|seguidor|perfil|brand|branding/.test(n)) return 'outros';
+  if (/traffic|trafego|trafico|landing|visita/.test(n)) return 'trafego';
+  if (/sales|\bvendas\b|\bventas\b|compras?\b|catalog|shopping|pmax|performance max|ecommerce|e-commerce|conversion|conversao|conversiones/.test(n)) return 'vendas';
   return null;
+}
+/* Funis que fazem sentido para este cliente: lista em DASH.funis, ou automático pelas colunas existentes. */
+function allowedFunnels() {
+  if (D.funis && D.funis.length) return D.funis.concat(['outros']);
+  var a = ['cadastro', 'whatsapp', 'outros'];
+  if (STATE.has.purchases) a.push('vendas');
+  if (STATE.has.lpv) a.push('trafego');
+  return a;
 }
 function classifyCampaigns(rows) {
   var agg = {};
@@ -270,18 +278,20 @@ function classifyCampaigns(rows) {
     a.purchases += r.purchases; a.leads += r.leads; a.conversations += r.conversations; a.lpv += r.lpv; a.clicks += r.clicks;
     if (r.objective) a.objective = r.objective;
   });
-  var overrides = D.objetivos || {}, out = {};
+  var overrides = D.objetivos || {}, out = {}, allow = allowedFunnels();
   Object.keys(agg).forEach(function (k) {
     var a = agg[k], f = null, why = '';
+    // 1) regra manual  2) fonte  3) resultado que a campanha gerou  4) nome  5) objetivo da planilha
     Object.keys(overrides).some(function (sub) { if (norm(a.campaign).indexOf(norm(sub)) > -1) { f = overrides[sub]; why = 'regra da configuração'; return true; } });
     if (!f && a.forced) { f = a.forced; why = 'definido na fonte'; }
-    if (!f) { f = funnelFromText(a.campaign); if (f) why = 'nome da campanha'; }
     if (!f) {
-      var res = [['vendas', a.purchases], ['cadastro', a.leads], ['whatsapp', a.conversations]].sort(function (x, y) { return y[1] - x[1]; });
-      if (res[0][1] > 0) { f = res[0][0]; why = 'resultado gerado'; }
+      var res = [['vendas', a.purchases], ['cadastro', a.leads], ['whatsapp', a.conversations]].filter(function (x) { return allow.indexOf(x[0]) > -1; }).sort(function (x, y) { return y[1] - x[1]; });
+      if (res.length && res[0][1] > 0) { f = res[0][0]; why = 'resultado gerado'; }
     }
+    if (!f) { f = funnelFromText(a.campaign); if (f) why = 'nome da campanha'; }
     if (!f) { f = funnelFromText(a.objective); if (f) why = 'objetivo da campanha'; }
     if (!f) { f = a.lpv > 0 ? 'trafego' : 'outros'; why = 'sem resultado de conversão'; }
+    if (allow.indexOf(f) < 0) { why += ' → ' + FNAME(f) + ' não se aplica a este cliente'; f = 'outros'; }
     out[k] = { funnel: f, why: why };
   });
   return out;
@@ -354,7 +364,8 @@ function processCRM(src, text) {
     var d = parseDate(r[map.date]); if (!d) return;
     var s = statusIdx > -1 ? norm(r[statusIdx]) : '';
     var sale = statusIdx > -1 && SALE_RE.test(s), qual = sale || (statusIdx > -1 && QUAL_RE.test(s));
-    out.push({ date: d, funnel: src.funil || 'cadastro', sale: sale, qual: qual, value: (sale && valueIdx > -1) ? num(r[valueIdx]) : 0, status: statusIdx > -1 ? String(r[statusIdx]).trim() : '' });
+    var raw = {}; header.forEach(function (hh, j) { raw[hh] = r[j] == null ? '' : r[j]; });
+    out.push({ date: d, funnel: src.funil || 'cadastro', sale: sale, qual: qual, value: (sale && valueIdx > -1) ? num(r[valueIdx]) : 0, status: statusIdx > -1 ? String(r[statusIdx]).trim() : '', raw: raw, src: src.nome || '' });
   });
   st.rows = out.length; st.hasStatus = statusIdx > -1;
   return out;
@@ -426,8 +437,11 @@ function filtered(from, to, extra) {
 }
 function crmIn(from, to, funnel) { return STATE.crm.filter(function (c) { return inRange(c.date, from, to) && (!funnel || c.funnel === funnel); }); }
 function funnelsPresent() {
-  var set = {};
-  STATE.rows.forEach(function (r) { if ((STATE.plat === 'all' || r.platform === STATE.plat) && (STATE.acct === 'all' || r.account === STATE.acct)) set[r.funnel] = 1; });
+  var per = resolvePeriod(), set = {};
+  STATE.rows.forEach(function (r) {
+    if ((STATE.plat !== 'all' && r.platform !== STATE.plat) || (STATE.acct !== 'all' && r.account !== STATE.acct)) return;
+    if (r.spend > 0 && (inRange(r.date, per.from, per.to) || inRange(r.date, per.pFrom, per.pTo))) set[r.funnel] = 1;
+  });
   return FUNNEL_ORDER.filter(function (f) { return set[f]; });
 }
 
@@ -677,6 +691,7 @@ var TABS = [
   ['funnels', function () { return L('Funis e insights', 'Embudos e insights'); }],
   ['sim', function () { return L('Projeção e metas', 'Proyección y metas'); }],
   ['camp', function () { return L('Campanhas', 'Campañas'); }],
+  ['crm', function () { return L('Cadastros (CRM)', 'Registros (CRM)'); }],
   ['pace', function () { return L('Ritmo de verba', 'Ritmo de inversión'); }],
   ['wa', function () { return L('Resumo WhatsApp', 'Resumen WhatsApp'); }],
   ['diag', function () { return L('Diagnóstico', 'Diagnóstico'); }]
@@ -696,7 +711,7 @@ function shell() {
     '</div><div class="row"><span id="dzCustom" style="display:none"><input type="date" id="dzFrom"> → <input type="date" id="dzTo"></span>' +
     '<label class="mut" style="font-size:12.5px"><input type="checkbox" id="dzToday"> ' + L('Incluir hoje (em andamento)', 'Incluir hoy (en curso)') + '</label>' +
     '<select id="dzPlat"></select><select id="dzAcct"></select></div></div><div id="dzPer" class="mut" style="font-size:12.5px;margin-top:10px"></div></div>' +
-    '<div class="tabs" id="dzTabs">' + TABS.map(function (t) { return '<button data-tab="' + t[0] + '">' + t[1]() + '</button>'; }).join('') + '</div>' +
+    '<div class="tabs" id="dzTabs">' + TABS.filter(function (t) { return t[0] !== 'crm' || (D.fontes || []).some(function (f) { return (f.tipo || (f.plataforma ? 'midia' : 'crm')) === 'crm'; }); }).map(function (t) { return '<button data-tab="' + t[0] + '">' + t[1]() + '</button>'; }).join('') + '</div>' +
     TABS.map(function (t) { return '<div class="view" id="v-' + t[0] + '"></div>'; }).join('') +
     '<div class="foot">' + L('Motor', 'Motor') + ' v' + VERSION + '</div>';
   bindShell();
@@ -998,6 +1013,40 @@ function renderCamp(per) {
   $$('th[data-col]', v).forEach(function (th) { th.onclick = function () { if (STATE.sort.col === th.dataset.col) STATE.sort.dir *= -1; else { STATE.sort.col = th.dataset.col; STATE.sort.dir = -1; } renderCamp(per); }; });
 }
 
+
+/* ============================== CADASTROS (CRM) ============================== */
+function isQuestionField(h) {
+  var n = norm(h); if (!n) return false;
+  var skip = ['nome', 'nome completo', 'name', 'full name', 'email', 'e-mail', 'telefone', 'phone', 'celular', 'whatsapp', 'data', 'dia', 'date', 'timestamp', 'created time', 'created at', 'data de cadastro', 'data de inscricao', 'horario de envio', 'id', 'lead id', 'form id', 'campanha', 'campaign', 'conjunto de anuncios', 'ad set', 'adset', 'anuncio', 'ad name', 'conta', 'account', 'plataforma', 'platform'];
+  if (skip.indexOf(n) > -1) return false;
+  if (/utm|fbclid|gclid|\bid\b|pixel|posicionamento|placement|criativo|creative|permalink|url|link|\bip\b|user agent|dispositivo|device|e-?mail|telefone|phone|celular|whatsapp|nome|name/.test(n)) return false;
+  return true;
+}
+function renderCRM(per) {
+  var v = $('#v-crm'); if (!v) return;
+  var now = STATE.crm.filter(function (c) { return inRange(c.date, per.from, per.to); }), prev = STATE.crm.filter(function (c) { return inRange(c.date, per.pFrom, per.pTo); });
+  var html = '<div class="note">' + L('Esta aba mostra só os cadastros registrados nas planilhas de formulário/CRM. Conversas de WhatsApp não entram aqui.', 'Esta pestaña muestra solo los registros de las planillas de formulario/CRM. Las conversaciones de WhatsApp no entran aquí.') + '</div>' + legendHTML(per) +
+    '<div class="grid" style="margin-bottom:14px">' + kpi(L('Cadastros recebidos', 'Registros recibidos'), now.length, prev.length, count) +
+    kpi(L('Média por dia', 'Promedio por día'), now.length / per.len, prev.length / per.pLen, function (x) { return nf(x, 1); });
+  var q = now.filter(function (c) { return c.qual; }).length, s = now.filter(function (c) { return c.sale; }).length;
+  if (STATE.sources.some(function (x) { return x.tipo === 'crm' && x.status.hasStatus; })) html += kpi(L('Qualificados', 'Calificados'), q, prev.filter(function (c) { return c.qual; }).length, count) + kpi(L('Vendas', 'Ventas'), s, prev.filter(function (c) { return c.sale; }).length, count);
+  html += '</div>';
+  if (!now.length) { v.innerHTML = html + '<div class="card empty">' + L('Nenhum cadastro no período selecionado.', 'Ningún registro en el período seleccionado.') + '</div>'; return; }
+  var fields = {}, order = [];
+  now.forEach(function (c) { Object.keys(c.raw || {}).forEach(function (k) { if (!fields[k]) { fields[k] = []; order.push(k); } fields[k].push(c.raw[k]); }); });
+  order.forEach(function (k) {
+    if (!isQuestionField(k)) return;
+    var counts = {}, answered = 0;
+    fields[k].forEach(function (x) { var t = String(x == null ? '' : x).trim(); if (!t || t === '-' || parseDate(t) && /\d{4}|\d\/\d/.test(t)) return; answered++; counts[t] = (counts[t] || 0) + 1; });
+    var e = Object.keys(counts).map(function (x) { return [x, counts[x]]; }).sort(function (a, b) { return b[1] - a[1]; });
+    if (!e.length || e.length > 15 || e.length === answered && answered > 3) return;
+    var max = e[0][1];
+    html += '<div class="card"><h3>' + esc(k) + '</h3><p class="mut" style="font-size:12.5px">' + answered + L(' respostas entre ', ' respuestas entre ') + now.length + L(' cadastros do período.', ' registros del período.') + '</p>' +
+      e.map(function (x) { var pc = answered ? x[1] / answered : 0; return '<div style="display:grid;grid-template-columns:minmax(120px,1.2fr) 3fr auto;gap:10px;align-items:center;margin:6px 0;font-size:13px"><span>' + esc(x[0]) + '</span><div class="paceBar" style="margin:0"><span style="width:' + (x[1] / max * 100) + '%;background:var(--ac)"></span></div><span class="mut">' + x[1] + ' · ' + pctf(pc, 0) + '</span></div>'; }).join('') + '</div>';
+  });
+  v.innerHTML = html;
+}
+
 /* ============================== RITMO DE VERBA ============================== */
 function renderPace() {
   var v = $('#v-pace'), today = todayISO(), end = STATE.incToday ? today : addDays(today, -1), ms = monthStart(today), me = monthEnd(today);
@@ -1078,7 +1127,7 @@ function syncBar(per) {
 function renderAll() {
   var per = resolvePeriod();
   syncBar(per);
-  [['overview', function () { renderOverview(per); }], ['funnels', function () { renderFunnels(per); }], ['sim', function () { renderSim(per); }], ['camp', function () { renderCamp(per); }], ['pace', renderPace], ['wa', function () { renderWa(per); }], ['diag', renderDiag]].forEach(function (x) {
+  [['overview', function () { renderOverview(per); }], ['funnels', function () { renderFunnels(per); }], ['sim', function () { renderSim(per); }], ['camp', function () { renderCamp(per); }], ['crm', function () { renderCRM(per); }], ['pace', renderPace], ['wa', function () { renderWa(per); }], ['diag', renderDiag]].forEach(function (x) {
     try { x[1](); } catch (e) { var el = $('#v-' + x[0]); if (el) el.innerHTML = '<div class="card down">' + L('Erro ao montar esta aba: ', 'Error al armar esta pestaña: ') + esc(e.message) + '</div>'; if (window.console) console.error(e); }
   });
   setTimeout(reportHeight, 50);
