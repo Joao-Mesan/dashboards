@@ -12,6 +12,7 @@ No GreatPages, crie um bloco de **HTML personalizado** com:
 window.DASH = {
   cliente: 'Nome do Cliente',
   pin: '1234',                 // opcional: senha de acesso (apaga a linha para não ter senha)
+  logo: 'https://…/logo.png',  // opcional: link da imagem do logo (sem isso, aparece a inicial do cliente)
   moeda: 'BRL',                // BRL, ARS, USD...
   idiomas: ['pt'],             // ['pt'] ou ['pt','es'] (o primeiro é o padrão)
   cor: '#c9a96a',              // cor de destaque do cliente
