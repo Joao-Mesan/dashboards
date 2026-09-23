@@ -20,7 +20,9 @@ window.DASH = {
     { plataforma: 'google', conta: 'Nome da conta Google', url: 'LINK_CSV_PUBLICADO' },
     { tipo: 'crm', funil: 'cadastro', nome: 'Leads do site', url: 'LINK_CSV_PUBLICADO' }
   ],
-  verbas: { 'Nome da conta Meta': 3000 }   // opcional: verba mensal por conta
+  verbas: { 'Nome da conta Meta': 3000 },  // opcional: verba mensal por conta
+  funis: ['whatsapp', 'cadastro'],         // opcional: funis que fazem sentido para o cliente
+  impostoMeta: 0.1215                      // opcional: imposto da Meta (padrão 12,15% em BRL, 0 nas outras moedas)
 };
 </script>
 <script src="https://cdn.jsdelivr.net/gh/Joao-Mesan/dashboards@1/motor.js"></script>
@@ -52,8 +54,8 @@ Cada campanha vai para um funil (**Vendas no site, Cadastros, WhatsApp, Tráfego
 
 1. Regra manual em `objetivos` (ver abaixo)
 2. `funil` definido na fonte
-3. Palavras no nome da campanha (ex: "WPP", "Leads", "Vendas", "Engaj")
-4. Resultado que ela gerou (compras, cadastros ou conversas)
+3. Resultado que ela gerou (compras, cadastros ou conversas)
+4. Palavras no nome da campanha (ex: "WPP", "Leads", "Engaj"), para campanhas sem resultado
 5. Coluna de objetivo da planilha, se existir
 
 Para corrigir uma campanha específica, acrescente em `window.DASH`:
@@ -61,6 +63,14 @@ Para corrigir uma campanha específica, acrescente em `window.DASH`:
 ```js
 objetivos: { 'trecho do nome da campanha': 'whatsapp' }
 ```
+
+Para limitar os funis que aparecem para um cliente (recomendado), acrescente:
+
+```js
+funis: ['whatsapp', 'cadastro']
+```
+
+Campanhas que não se encaixam nesses funis vão para "Alcance e engajamento". Sem essa linha, o motor mostra Vendas no site só se a planilha tiver coluna de compras, e Tráfego só se tiver visualizações da página de destino. Um funil só aparece quando teve investimento no período atual ou no anterior.
 
 A aba **Diagnóstico** mostra a classificação de cada campanha e o critério usado.
 
