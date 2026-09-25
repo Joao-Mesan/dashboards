@@ -6,7 +6,7 @@
 (function () {
 'use strict';
 
-var VERSION = '1.7.1';
+var VERSION = '1.7.2';
 var D = window.DASH || {};
 var ROOT = document.getElementById(D.elemento || 'dash');
 if (!ROOT) return;
@@ -1583,7 +1583,8 @@ function isQuestionField(h) {
   var n = norm(h); if (!n) return false;
   var skip = ['nome', 'nome completo', 'name', 'full name', 'email', 'e-mail', 'telefone', 'phone', 'celular', 'whatsapp', 'data', 'dia', 'date', 'timestamp', 'created time', 'created at', 'data de cadastro', 'data de inscricao', 'horario de envio', 'id', 'lead id', 'form id', 'campanha', 'campaign', 'conjunto de anuncios', 'ad set', 'adset', 'anuncio', 'ad name', 'conta', 'account', 'plataforma', 'platform'];
   if (skip.indexOf(n) > -1) return false;
-  if (/utm|fbclid|gclid|gbraid|wbraid|^fbc$|^fbp$|event_?id|adset|adgroup|ad_?id|matchtype|network|site_?source|landing_?page|referrer|\bid\b|pixel|posicionamento|placement|criativo|creative|permalink|url|link|\bip\b|user agent|dispositivo|device|e-?mail|telefone|phone|celular|whatsapp|nome|name/.test(n)) return false;
+  var S = '[ _-]?';   // as planilhas alternam "landing page", "landing_page" e "landing-page"
+  if (new RegExp('utm|fbclid|gclid|gbraid|wbraid|^fbc$|^fbp$|event' + S + 'id|ad' + S + 'set|ad' + S + 'group|ad' + S + 'id|match' + S + 'type|network|site' + S + 'source|landing' + S + 'page|referrer|\\bid\\b|pixel|posicionamento|placement|criativo|creative|permalink|url|link|\\bip\\b|user agent|dispositivo|device|e-?mail|telefone|phone|celular|whatsapp|nome|name').test(n)) return false;
   return true;
 }
 /* Pizza (rosca) para perguntas com poucas respostas distintas. Acima de 6 fatias
@@ -1681,6 +1682,17 @@ function renderCRM(per) {
       var counts = {}, answered = 0;
       fields[k].forEach(function (x) { var t = String(x == null ? '' : x).trim(); if (!t || t === '-' || (parseDate(t) && /\d{4}|\d\/\d/.test(t))) return; t = pretty(t); answered++; counts[t] = (counts[t] || 0) + 1; });
       var e = Object.keys(counts).map(function (x) { return [x, counts[x]]; }).sort(function (a, b) { return b[1] - a[1]; });
+      /* Independente do nome da coluna: se as respostas são links, identificadores
+         numéricos longos ou textos enormes, não é uma pergunta de perfil. */
+      if (!(Array.isArray(D.perguntas) && D.perguntas.length)) {
+        var tecnico = 0, longos = 0;
+        e.forEach(function (x) {
+          var t = String(x[0]);
+          if (/^https?:\/\//i.test(t) || /^[0-9]{11,}$/.test(t.replace(/\D/g, '')) && /^[\d.,\s-]+$/.test(t)) tecnico++;
+          if (t.length > 60) longos++;
+        });
+        if (tecnico >= Math.max(1, Math.ceil(e.length * 0.4)) || longos >= Math.max(1, Math.ceil(e.length * 0.4))) return;
+      }
       // resposta quase sempre diferente = texto livre, não categoria
       if (!e.length || e.length > 15 || (answered > 3 && e.length / answered > 0.6)) return;
       var max = e[0][1];
