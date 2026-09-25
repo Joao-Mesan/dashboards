@@ -6,7 +6,7 @@
 (function () {
 'use strict';
 
-var VERSION = '1.2.2';
+var VERSION = '1.4.0';
 var D = window.DASH || {};
 var ROOT = document.getElementById(D.elemento || 'dash');
 if (!ROOT) return;
@@ -134,6 +134,15 @@ container-type:inline-size;max-width:1120px;margin:0 auto;background:var(--bg);c
 .dz td.prev,.dz th.prev{color:var(--mut)}\
 .dz .vf{display:flex;flex-direction:column;align-items:center;gap:0;margin:8px 0}\
 .dz .vf .bar{width:100%;display:flex;justify-content:center}\
+.dz table.split th.gstart,.dz table.split td.gstart{border-left:2px solid var(--bd)}\
+.dz table.split tr.grp th{font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--mut);padding-bottom:2px;border-bottom:0;cursor:default}\
+.dz table.split tr.grp th small{font-weight:400;text-transform:none;letter-spacing:0;font-size:11px}\
+.dz th.sorted{color:var(--ac)}\
+.dz .sar{margin-left:5px;font-size:10px}\
+.dz .flow .fn{font-size:11.5px;margin-top:3px}\
+.dz .inp{position:relative;display:block}\
+.dz .inp .pfx{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--mut);font-size:13px;pointer-events:none}\
+.dz .inp.hasp input{padding-left:52px}\
 .dz .vf .blk{box-sizing:border-box}\
 .dz .vf .blk{border-radius:10px;padding:10px 14px;transition:width .25s ease;background:color-mix(in srgb,var(--ac) 16%,var(--card2));border:1px solid color-mix(in srgb,var(--ac) 45%,transparent);display:flex;justify-content:space-between;align-items:baseline;gap:10px;min-width:210px;max-width:100%}\
 .dz .vf .blk .l{font-size:13px}.dz .vf .blk .x{font-size:20px;font-weight:600;white-space:nowrap}\
@@ -600,10 +609,10 @@ function buildFunnel(f, per) {
     if (crmSrc) st('crm', L('Chegaram ao comercial', 'Llegaron a ventas'), crmCur.n, crmPrev.n, resKey, null, { rateKey: 'crm' });
     else st('crm', L('Chegaram ao comercial', 'Llegaron a ventas'), null, null, resKey, null, { missing: 'crm' });
     if (crmStatus) {
-      st('qual', L('Tinham perfil', 'Tenían perfil'), crmCur.qual, crmPrev.qual, 'crm', BENCH.qualRate, { rateKey: 'qual' });
+      st('qual', L('Qualificados', 'Calificados'), crmCur.qual, crmPrev.qual, 'crm', BENCH.qualRate, { rateKey: 'qual' });
       st('sale', L('Compraram', 'Compraron'), crmCur.sale, crmPrev.sale, 'qual', BENCH.saleRate, { rateKey: 'sale', sale: true });
     } else {
-      st('qual', L('Tinham perfil', 'Tenían perfil'), null, null, 'crm', null, { missing: 'qual' });
+      st('qual', L('Qualificados', 'Calificados'), null, null, 'crm', null, { missing: 'qual' });
       st('sale', L('Compraram', 'Compraron'), null, null, 'qual', null, { missing: 'sale' });
     }
   }
@@ -1220,8 +1229,9 @@ function simDefaults(per) {
   var tk = F && F.f === 'vendas' && F.cur.purchases > 0 && F.cur.revenue > 0 ? Math.round(F.cur.revenue / F.cur.purchases) : 0;
   var vb = 0; Object.keys(D.verbas || {}).forEach(function (k) { vb += +D.verbas[k] || 0; });
   var mt = F && F.f === 'vendas' && F.cur.purchases > 0 ? Math.max(1, Math.round(F.cur.purchases / per.len * 30 * 1.1)) : 10;
-  return { funil: f0, verba: vb || Math.round(last30.spend / 100) * 100 || 1000, ticket: tk, margem: 30, meta: mt, hipCad: 5, hipWa: 5, cen: 'R' };
+  return { funil: f0, verba: vb || Math.round(last30.spend / 100) * 100 || 1000, ticket: tk, margem: 30, meta: mt, metaFat: tk ? mt * tk : 0, metaTipo: 'vendas', hipCad: 5, hipWa: 5, cen: 'R' };
 }
+function vendasLbl(n) { return Math.round(n) === 1 ? L('venda', 'venta') : L('vendas', 'ventas'); }
 function renderSim(per) {
   var v = $('#v-sim'), fs = simFunnels();
   if (!fs.length) { v.innerHTML = '<div class="card empty">' + L('Nenhum funil de conversão no filtro atual para simular.', 'Ningún embudo de conversión para simular.') + '</div>'; return; }
@@ -1234,33 +1244,55 @@ function renderSim(per) {
   else saleRate = (f === 'cadastro' ? sim.hipCad : sim.hipWa) / 100;
   var tkReal = f === 'vendas' && F.cur.purchases > 0 && F.cur.revenue > 0 ? F.cur.revenue / F.cur.purchases : null;
   var rn = RNAME(f), rn1 = RNAME(f, false), hipKey = f === 'cadastro' ? 'hipCad' : 'hipWa';
+  if (sim.metaTipo === 'fat' && sim.ticket > 0) sim.meta = Math.max(1, Math.round((sim.metaFat || 0) / sim.ticket));
+  else if (sim.metaTipo !== 'fat' && sim.ticket > 0) sim.metaFat = Math.round(sim.meta * sim.ticket);
   var scen = { P: SR.P, R: SR.R, O: SR.O }[sim.cen] || SR.R, X = project(scen, sim, saleRate, tax);
 
-  function q(key, label, val, shown, help, range) {
+  function q(key, label, val, shown, help, range, kind) {
+    if (range) return '<div class="q"><div class="ql"><span>' + label + '</span><b data-show="' + key + '">' + shown + '</b></div>' + (help ? '<small class="mut">' + help + '</small>' : '') +
+      '<input type="range" data-s="' + key + '" min="' + range[0] + '" max="' + range[1] + '" step="' + range[2] + '" value="' + val + '"></div>';
+    // campo de texto formatado (1.234.567) com prefixo de moeda quando for dinheiro
+    var pref = kind === 'money' ? '<span class="pfx">' + CUR + '</span>' : '';
     return '<div class="q"><div class="ql"><span>' + label + '</span><b data-show="' + key + '">' + shown + '</b></div>' + (help ? '<small class="mut">' + help + '</small>' : '') +
-      (range ? '<input type="range" data-s="' + key + '" min="' + range[0] + '" max="' + range[1] + '" step="' + range[2] + '" value="' + val + '">' : '<input type="number" inputmode="decimal" data-s="' + key + '" value="' + (val || '') + '">') + '</div>';
+      '<div class="inp' + (pref ? ' hasp' : '') + '">' + pref + '<input type="text" inputmode="decimal" data-s="' + key + '" data-kind="' + (kind || 'num') + '" value="' + (val ? nf(val, 0) : '') + '"></div></div>';
   }
   var html = '<div class="card hl"><h2>🧭 ' + L('Simule o mês', 'Simulá el mes') + '</h2><p class="mut">' + L('Responda com os números do seu negócio. O resto vem dos resultados reais das campanhas. Nada do que você mexer aqui altera as campanhas — fica salvo só neste aparelho.', 'Respondé con los números de tu negocio. El resto viene de los resultados reales de las campañas. Nada de lo que muevas acá cambia las campañas — queda guardado solo en este dispositivo.') + '</p>';
   if (fs.length > 1) html += '<div class="seg" data-seg="funil">' + fs.map(function (x) { return '<button data-v="' + x + '" class="' + (x === f ? 'on' : '') + '">' + FNAME(x) + '</button>'; }).join('') + '</div>';
-  html += q('verba', '💰 ' + L('Quanto vai investir no mês?', '¿Cuánto vas a invertir en el mes?'), sim.verba, money(sim.verba), L('Total pago às plataformas.', 'Total pagado a las plataformas.')) +
-    q('ticket', '🧾 ' + L('Quanto vale uma venda, em média?', '¿Cuánto vale una venta, en promedio?'), sim.ticket, sim.ticket ? money(sim.ticket) : '—', tkReal ? L('Nas vendas do site no período, a média foi ', 'En las ventas del período, el promedio fue ') + money(tkReal) + '.' : '') +
+  html += q('verba', '💰 ' + L('Quanto vai investir no mês?', '¿Cuánto vas a invertir en el mes?'), sim.verba, money(sim.verba), L('Total pago às plataformas.', 'Total pagado a las plataformas.'), null, 'money') +
+    q('ticket', '🧾 ' + L('Quanto vale uma venda, em média?', '¿Cuánto vale una venta, en promedio?'), sim.ticket, sim.ticket ? money(sim.ticket) : '—', tkReal ? L('Nas vendas do site no período, a média foi ', 'En las ventas del período, el promedio fue ') + money(tkReal) + '.' : '', null, 'money') +
     q('margem', '📊 ' + L('De cada 100 vendidos, quanto sobra depois dos custos?', 'De cada 100 vendidos, ¿cuánto queda después de los costos?'), sim.margem, nf(sim.margem, 0) + '%', L('Depois de custos, impostos e comissões. Sem a mídia.', 'Después de costos, impuestos y comisiones. Sin los medios.'), [1, 90, 1]) +
-    q('meta', '🎯 ' + L('Quantas vendas você quer no mês?', '¿Cuántas ventas querés en el mes?'), sim.meta, count(sim.meta));
+    (sim.metaTipo === 'fat'
+      ? q('metaFat', '🎯 ' + L('Quanto você quer faturar no mês?', '¿Cuánto querés facturar en el mes?'), sim.metaFat, money(sim.metaFat), sim.ticket ? L('Equivale a ', 'Equivale a ') + count(sim.meta) + ' ' + vendasLbl(sim.meta) + L(' com o ticket acima.', ' con el ticket de arriba.') : L('Informe quanto vale uma venda para converter em vendas.', 'Informá cuánto vale una venta para convertir en ventas.'), null, 'money')
+      : q('meta', '🎯 ' + L('Quantas vendas você quer no mês?', '¿Cuántas ventas querés en el mes?'), sim.meta, count(sim.meta), sim.ticket ? L('Equivale a ', 'Equivale a ') + money(sim.meta * sim.ticket) + L(' de faturamento.', ' de facturación.') : '')) +
+    '<div class="seg" data-seg="metaTipo" style="margin-top:-4px"><button data-v="vendas" class="' + (sim.metaTipo === 'fat' ? '' : 'on') + '">' + L('Definir por vendas', 'Definir por ventas') + '</button><button data-v="fat" class="' + (sim.metaTipo === 'fat' ? 'on' : '') + '">' + L('Definir por faturamento', 'Definir por facturación') + '</button></div>';
   if (!saleReal) html += q(hipKey, '🤝 ' + L('De cada 100 ', 'De cada 100 ') + rn + L(', quantos viram venda?', ', ¿cuántos se convierten en venta?'), sim[hipKey], nf(sim[hipKey], sim[hipKey] % 1 ? 1 : 0) + ' <span class="tag hip">' + L('palpite', 'estimación') + '</span>', L('Palpite: ninguém registra isso hoje.', 'Estimación: nadie lo registra hoy.'), [0.5, 40, 0.5]);
   html += '</div>';
 
   // O caminho do dinheiro
   var cenNames = { P: L('Cauteloso', 'Cauteloso'), R: L('Provável', 'Probable'), O: L('Otimista', 'Optimista') };
   var cenHelp = { P: L('usa as semanas de pior desempenho do período', 'usa las semanas de peor rendimiento del período'), R: L('usa a média do período', 'usa el promedio del período'), O: L('usa as semanas de melhor desempenho do período', 'usa las semanas de mejor rendimiento del período') };
-  function fstep(ic, label, help, val, tag) { return '<div class="fs"><div class="ic">' + ic + '</div><div><div class="fl">' + label + (tag || '') + '</div><div class="fh">' + help + '</div></div><div class="fv">' + val + '</div></div><div class="con"></div>'; }
+  function fstep(ic, label, help, val, tag, note) { return '<div class="fs"' + (note ? ' title="' + esc(note.replace(/<[^>]+>/g, '')) + '"' : '') + '><div class="ic">' + ic + '</div><div><div class="fl">' + label + (tag || '') + '</div><div class="fh">' + help + '</div>' + (note ? '<div class="fn">' + note + '</div>' : '') + '</div><div class="fv">' + val + '</div></div><div class="con"></div>'; }
+  /* Diz, em cada etapa, o que teria de mudar em relação ao cenário Provável para
+     este cenário acontecer. Sem isso, "Otimista" é só um número maior sem causa. */
+  function cenNote(metric, better) {
+    if (sim.cen === 'R' || !ok(scen[metric]) || !ok(SR.R[metric]) || SR.R[metric] === 0) return '';
+    var d = (scen[metric] - SR.R[metric]) / SR.R[metric];
+    if (Math.abs(d) < 0.01) return '';
+    var fmtv = metric === 'cpm' ? money : function (x) { return per100(x) + '%'; };
+    var sobe = d > 0, bom = sobe === !!better;
+    var verbo = sobe ? L('subir ', 'subir ') : L('cair ', 'bajar ');
+    var txt = (sim.cen === 'O' ? L('Para chegar aqui, precisa ', 'Para llegar acá, tiene que ') : L('Este cenário assume ', 'Este escenario asume ')) +
+      verbo + nf(Math.abs(d) * 100, 0) + '% (' + fmtv(SR.R[metric]) + ' → ' + fmtv(scen[metric]) + ')';
+    return '<span class="' + (bom ? 'up' : 'down') + '">' + txt + '</span>';
+  }
   var chip = function (real) { return ' <span class="tag ' + (real ? 'real' : 'hip') + '">' + (real ? L('dado real', 'dato real') : L('palpite', 'estimación')) + '</span>'; };
   html += '<div class="card"><h2>' + L('O caminho do seu dinheiro', 'El camino de tu dinero') + '</h2>' +
     '<p class="mut">' + L('Cada linha é uma etapa do caminho entre o que você paga às plataformas e o que entra no caixa. As porcentagens vêm do desempenho real das suas campanhas no período.', 'Cada línea es una etapa del camino entre lo que pagás a las plataformas y lo que entra en caja. Los porcentajes vienen del rendimiento real de tus campañas en el período.') + '</p>' +
     '<div class="seg" data-seg="cen">' + ['P', 'R', 'O'].map(function (k) { return '<button data-v="' + k + '" class="' + (k === sim.cen ? 'on' : '') + '">' + cenNames[k] + '</button>'; }).join('') + '</div><p class="mut" style="font-size:12.5px;margin:8px 0 0">' + cenNames[sim.cen] + ': ' + cenHelp[sim.cen] + '.</p><div class="flow">' +
     fstep('💰', L('Você investe', 'Invertís'), X.taxes > 1 ? L('sendo ', 'de los cuales ') + money(X.taxes) + L(' de imposto cobrado pela plataforma', ' son impuesto de la plataforma') : L('total no mês', 'total del mes'), money(sim.verba)) +
-    fstep('👀', L('Os anúncios aparecem', 'Los anuncios aparecen'), money(scen.cpm) + L(' a cada mil', ' cada mil'), nf(X.impr, 0) + L(' vezes', ' veces')) +
-    fstep('👆', L('Pessoas clicam', 'Personas hacen clic'), per100(scen.ctr) + L(' de cada 100 que veem', ' de cada 100 que ven'), nf(X.clicks, 0)) +
-    fstep(f === 'whatsapp' ? '💬' : f === 'vendas' ? '🛒' : '📝', cap(rn), per100(scen.c2r) + L(' de cada 100 que clicam', ' de cada 100 que hacen clic'), nf(X.res, 0), chip(true)) +
+    fstep('👀', L('Os anúncios aparecem', 'Los anuncios aparecen'), money(scen.cpm) + L(' a cada mil', ' cada mil'), nf(X.impr, 0) + L(' vezes', ' veces'), '', cenNote('cpm', false)) +
+    fstep('👆', L('Pessoas clicam', 'Personas hacen clic'), per100(scen.ctr) + L(' de cada 100 que veem', ' de cada 100 que ven'), nf(X.clicks, 0), '', cenNote('ctr', true)) +
+    fstep(f === 'whatsapp' ? '💬' : f === 'vendas' ? '🛒' : '📝', cap(rn), per100(scen.c2r) + L(' de cada 100 que clicam', ' de cada 100 que hacen clic'), nf(X.res, 0), chip(true), cenNote('c2r', true)) +
     (f !== 'vendas' ? fstep('🤝', L('Viram venda', 'Se convierten en venta'), per100(saleRate) + L(' de cada 100 ', ' de cada 100 ') + rn, nf(X.sales, 0), chip(saleReal)) : '') +
     fstep('💵', L('Faturamento', 'Facturación'), sim.ticket ? nf(X.sales, 0) + ' × ' + money(sim.ticket) : L('informe quanto vale uma venda', 'informá cuánto vale una venta'), money(X.rev)) + '</div>';
   var vendaW = function (n) { return plural(n, L('venda', 'venta'), L('vendas', 'ventas')); };
@@ -1312,14 +1344,24 @@ function scenTable(SR, sim, saleRate, tax, saleReal, rn, rn1, f) {
     row(L('Faturamento', 'Facturación'), P.rev, R.rev, O.rev, money) + row(L('Custo por venda', 'Costo por venta'), P.cac, R.cac, O.cac, money) + row('ROAS', P.roas, R.roas, O.roas, xf) +
     row(L('Lucro', 'Ganancia'), P.profit, R.profit, O.profit, money) + '</tbody></table>');
 }
+function simParse(str) {
+  var s = String(str == null ? '' : str).replace(/[^\d,.\-]/g, '');
+  if (!s) return 0;
+  var ld = s.lastIndexOf('.'), lc = s.lastIndexOf(',');
+  if (ld > -1 && lc > -1) s = lc > ld ? s.replace(/\./g, '').replace(',', '.') : s.replace(/,/g, '');
+  else if (lc > -1) s = (s.length - lc - 1) === 3 && s.split(',').length === 2 ? s.replace(',', '') : s.replace(',', '.');
+  else if (ld > -1) s = (s.length - ld - 1) === 3 && s.split('.').length === 2 ? s.replace('.', '') : s;
+  return parseFloat(s) || 0;
+}
 function bindSim(v, per) {
   $$('input[data-s]', v).forEach(function (el) {
-    var key = el.dataset.s;
+    var key = el.dataset.s, isTxt = el.type === 'text';
+    if (isTxt) el.onblur = function () { var n = simParse(el.value); el.value = n ? nf(n, 0) : ''; };
     el.oninput = function () {
-      var val = parseFloat(el.value) || 0, sh = $('[data-show="' + key + '"]', v);
+      var val = isTxt ? simParse(el.value) : (parseFloat(el.value) || 0), sh = $('[data-show="' + key + '"]', v);
       if (sh) sh.innerHTML = key === 'margem' ? nf(val, 0) + '%' : key === 'verba' || key === 'ticket' ? money(val) : key === 'meta' ? count(val) : nf(val, 1) + ' <span class="tag hip">' + L('palpite', 'estimación') + '</span>';
     };
-    el.onchange = function () { var s = store.get('sim', {}); s[key] = parseFloat(el.value) || 0; store.set('sim', s); renderSim(per); enhanceTables(); };
+    el.onchange = function () { var s = store.get('sim', {}); s[key] = isTxt ? simParse(el.value) : (parseFloat(el.value) || 0); store.set('sim', s); renderSim(per); enhanceTables(); };
   });
   $$('[data-seg]', v).forEach(function (seg) { $$('button', seg).forEach(function (b) { b.onclick = function () { var s = store.get('sim', {}); s[seg.dataset.seg] = b.dataset.v; store.set('sim', s); renderSim(per); enhanceTables(); }; }); });
   $$('[data-go]', v).forEach(function (a) { a.onclick = function (e) { e.preventDefault(); goTab(a.dataset.go); }; });
@@ -1350,11 +1392,23 @@ function renderCamp(per) {
         '<div><span>' + L('Custo cada', 'Costo c/u') + '</span><b>' + money(r.cprNow) + '</b><span>' + L('antes ', 'antes ') + money(r.cprPrev) + '</span></div></div></div>';
     }).join('') : '<div class="empty">' + L('Sem campanhas no período.', 'Sin campañas en el período.') + '</div>') + '</div>';
   // Computador: tabela
-  html += '<div class="only-wide">' + tableWrap('<table><thead><tr><th data-col="name">' + L('Campanha', 'Campaña') + '</th><th data-col="spendNow">' + L('Investido', 'Invertido') + '</th><th class="prev" data-col="spendPrev">' + L('antes', 'antes') + '</th><th data-col="resNow">' + L('Resultados', 'Resultados') + '</th><th class="prev" data-col="resPrev">' + L('antes', 'antes') + '</th><th data-col="cprNow">' + L('Custo cada', 'Costo c/u') + '</th><th class="prev" data-col="cprPrev">' + L('antes', 'antes') + '</th>' + (hasRev ? '<th data-col="roasNow">ROAS</th>' : '') + '</tr></thead><tbody>' +
+  function sortMark(col) { return STATE.sort.col === col ? '<span class="sar">' + (STATE.sort.dir < 0 ? '▼' : '▲') + '</span>' : ''; }
+  function th(col, label, cls) { return '<th class="' + (cls || '') + (STATE.sort.col === col ? ' sorted' : '') + '" data-col="' + col + '">' + label + sortMark(col) + '</th>'; }
+  var rk0 = L('Resultados', 'Resultados'), inv = L('Investido', 'Invertido'), cc = L('Custo cada', 'Costo c/u');
+  html += '<div class="only-wide">' + tableWrap('<table class="split"><thead>' +
+    '<tr class="grp"><th></th><th class="prev gstart" colspan="3">' + L('Período anterior', 'Período anterior') + '<br><small>' + fmtD(per.pFrom) + ' → ' + fmtD(per.pTo) + '</small></th>' +
+    '<th class="gstart" colspan="' + (hasRev ? 4 : 3) + '">' + L('Período atual', 'Período actual') + '<br><small>' + fmtD(per.from) + ' → ' + fmtD(per.to) + '</small></th></tr>' +
+    '<tr>' + th('name', L('Campanha', 'Campaña')) +
+      th('spendPrev', inv, 'prev gstart') + th('resPrev', rk0, 'prev') + th('cprPrev', cc, 'prev') +
+      th('spendNow', inv, 'gstart') + th('resNow', rk0) + th('cprNow', cc) + (hasRev ? th('roasNow', 'ROAS') : '') +
+    '</tr></thead><tbody>' +
     (rows.length ? rows.map(function (r, idx) {
       var rk = RESULT(r.f);
-      return '<tr' + (idx >= 5 ? ' class="more"' : '') + '><td>' + tags(r) + '<div>' + nameHTML(r.name) + '</div></td><td>' + money(r.spendNow) + '</td><td class="prev">' + money(r.spendPrev) + '</td><td>' + (rk ? count(r.resNow) + ' <small class="mut">' + RNAME(r.f) + '</small>' : '—') + '</td><td class="prev">' + (rk ? count(r.resPrev) : '—') + '</td><td>' + money(r.cprNow) + '</td><td class="prev">' + money(r.cprPrev) + '</td>' + (hasRev ? '<td>' + xf(r.roasNow) + '</td>' : '') + '</tr>';
-    }).join('') : '<tr><td colspan="8" class="empty">' + L('Sem campanhas no período.', 'Sin campañas.') + '</td></tr>') + '</tbody></table>') + '</div></div>';
+      return '<tr' + (idx >= 5 ? ' class="more"' : '') + '><td>' + tags(r) + '<div>' + nameHTML(r.name) + '</div></td>' +
+        '<td class="prev gstart">' + money(r.spendPrev) + '</td><td class="prev">' + (rk ? count(r.resPrev) : '—') + '</td><td class="prev">' + money(r.cprPrev) + '</td>' +
+        '<td class="gstart">' + money(r.spendNow) + '</td><td>' + (rk ? count(r.resNow) + ' <small class="mut">' + RNAME(r.f) + '</small>' : '—') + '</td><td>' + money(r.cprNow) + '</td>' +
+        (hasRev ? '<td>' + xf(r.roasNow) + '</td>' : '') + '</tr>';
+    }).join('') : '<tr><td colspan="9" class="empty">' + L('Sem campanhas no período.', 'Sin campañas.') + '</td></tr>') + '</tbody></table>') + '</div></div>';
   if (rows.length > 5) html = html.replace(/<\/div>$/, '') + '<button class="btn" id="dzAll" style="margin-top:10px;width:100%">' + (STATE.campAll ? L('Mostrar só as 5 maiores', 'Mostrar solo las 5 mayores') : L('Ver todas as campanhas', 'Ver todas las campañas') + ' (' + rows.length + ')') + '</button></div>';
   var ins = insights(per);
   html += '<div class="card"><h2>' + L('O que os números dizem', 'Lo que dicen los números') + '</h2><p class="mut" style="font-size:12px">' + L('Leituras automáticas: apontam onde olhar, não são certezas.', 'Lecturas automáticas: señalan dónde mirar, no son certezas.') + '</p>' +
@@ -1362,7 +1416,7 @@ function renderCamp(per) {
   v.innerHTML = html;
   if ($('#dzAll')) $('#dzAll').onclick = function () { STATE.campAll = !STATE.campAll; renderCamp(per); enhanceTables(); reportHeight(); };
   $$('th[data-col]', v).forEach(function (th) { th.onclick = function () { if (STATE.sort.col === th.dataset.col) STATE.sort.dir *= -1; else { STATE.sort.col = th.dataset.col; STATE.sort.dir = th.dataset.col === 'cprNow' || th.dataset.col === 'name' ? 1 : -1; } renderCamp(per); enhanceTables(); }; });
-  var sn = $('#dzSortN'); if (sn) { sn.value = STATE.sort.col; sn.onchange = function () { STATE.sort.col = sn.value; STATE.sort.dir = sn.value === 'cprNow' || sn.value === 'name' ? 1 : -1; renderCamp(per); }; }
+  var sn = $('#dzSortN'); if (sn) { sn.value = /Prev$/.test(STATE.sort.col) ? STATE.sort.col.replace('Prev', 'Now') : STATE.sort.col; sn.onchange = function () { STATE.sort.col = sn.value; STATE.sort.dir = sn.value === 'cprNow' || sn.value === 'name' ? 1 : -1; renderCamp(per); }; }
 }
 
 /* ============================== CADASTROS (CRM) ============================== */
