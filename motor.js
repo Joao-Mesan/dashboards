@@ -6,7 +6,7 @@
 (function () {
 'use strict';
 
-var VERSION = '1.5.1';
+var VERSION = '1.7.0';
 var D = window.DASH || {};
 var ROOT = document.getElementById(D.elemento || 'dash');
 if (!ROOT) return;
@@ -140,6 +140,20 @@ container-type:inline-size;max-width:1120px;margin:0 auto;background:var(--bg);c
 .dz th.sorted{color:var(--ac)}\
 .dz .sar{margin-left:5px;font-size:10px}\
 .dz .flow .fn{font-size:11.5px;margin-top:3px}\
+.dz .nt{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;border:1px solid var(--bd);color:var(--mut);font-size:10px;line-height:1;margin-left:6px;cursor:help;position:relative;vertical-align:middle;user-select:none}\
+.dz .nt:hover,.dz .nt.on{border-color:var(--ac);color:var(--ac)}\
+.dz .nt .ntx{display:none;position:absolute;bottom:22px;left:50%;transform:translateX(-50%);width:250px;background:#08080a;border:1px solid var(--bd);border-radius:10px;padding:10px 12px;font-size:12.5px;line-height:1.5;color:var(--mut);text-align:left;z-index:20;box-shadow:0 10px 30px rgba(0,0,0,.6);cursor:auto}\
+.dz .nt.on .ntx{display:block}\
+.dz .nt:focus{outline:2px solid var(--ac);outline-offset:2px}\
+.dz .donut{display:flex;gap:18px;align-items:center;flex-wrap:wrap;margin-top:12px}\
+.dz .donut svg{flex:none}\
+.dz .dtx{fill:var(--tx);font-size:22px;font-weight:600}\
+.dz .dtx2{fill:var(--mut);font-size:11px}\
+.dz .dleg{flex:1;min-width:190px;display:flex;flex-direction:column;gap:7px}\
+.dz .dlg{display:flex;align-items:center;gap:9px;font-size:13px}\
+.dz .dlg .dot{width:10px;height:10px;border-radius:3px;flex:none}\
+.dz .dlg .dl{flex:1;min-width:0}\
+.dz .dlg .dn{color:var(--mut);font-size:12px;min-width:26px;text-align:right}\
 .dz .inp{position:relative;display:block}\
 .dz .inp .pfx{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--mut);font-size:13px;pointer-events:none}\
 .dz .inp.hasp input{padding-left:52px}\
@@ -454,7 +468,52 @@ function processCRM(src, text) {
   if (!rows.length) { st.error = L('Planilha vazia.', 'Planilla vacía.'); return []; }
   var h = findHeaderRow(rows), header = rows[h], normed = header.map(norm);
   var map = mapColumns(header, ['date']);
-  var statusIdx = src.colunaStatus ? normed.indexOf(norm(src.colunaStatus)) : normed.findIndex(function (x) { return /status|etapa|situac|fase|stage|qualific|resultado/.test(x); });
+  /* O nome da coluna não basta: já apareceu planilha com "Data de entrada"
+     totalmente vazia e a data real em "Data de qualificação". Aqui o motor
+     testa quantas linhas cada coluna candidata consegue virar data de verdade
+     e fica com a melhor. Sem isso, a fonte inteira sumiria em silêncio. */
+  var amostra = rows.slice(h + 1, h + 400);
+  function taxaData(idx) {
+    if (idx == null || idx < 0) return 0;
+    var vivos = 0, bons = 0;
+    amostra.forEach(function (r) {
+      var t = String(r[idx] == null ? '' : r[idx]).trim();
+      if (!t) return;
+      vivos++;
+      if (parseDate(t)) bons++;
+    });
+    return amostra.length ? bons / amostra.length : 0;
+  }
+  if (src.colunaData) {
+    var forc = normed.indexOf(norm(src.colunaData));
+    if (forc > -1) map.date = forc;
+  } else {
+    var melhor = map.date, melhorTaxa = taxaData(map.date);
+    if (melhorTaxa < 0.5) {
+      header.forEach(function (_, j) {
+        var t = taxaData(j);
+        if (t > melhorTaxa + 0.05) { melhorTaxa = t; melhor = j; }
+      });
+      map.date = melhor;
+    }
+    st.dateScore = melhorTaxa;
+  }
+  st.dateCol = map.date != null && map.date > -1 ? header[map.date] : null;
+  /* "Data de qualificação" contém "qualific" e era escolhida como coluna de
+     status. Agora: primeiro quem tem "status" no nome, depois os outros termos,
+     sempre descartando colunas de data. */
+  var naoStatus = function (x) { return /^data|fecha|^date|horario|timestamp/.test(x); };
+  var statusIdx = -1;
+  if (src.colunaStatus) statusIdx = normed.indexOf(norm(src.colunaStatus));
+  else {
+    statusIdx = normed.findIndex(function (x) { return /status/.test(x) && !naoStatus(x); });
+    if (statusIdx < 0) statusIdx = normed.findIndex(function (x) { return /etapa|situac|fase|stage|qualific|resultado/.test(x) && !naoStatus(x); });
+  }
+  // quando a própria planilha JÁ é a lista de qualificados (ou de vendas), não há
+  // coluna de status: a etapa vem declarada na fonte
+  var forcaQual = src.etapa === 'qualificado' || src.etapa === 'qual';
+  var forcaVenda = src.etapa === 'venda' || src.etapa === 'vendido';
+  var utmIdx = src.colunaCampanha ? normed.indexOf(norm(src.colunaCampanha)) : normed.findIndex(function (x) { return /utm[_ ]?campaign|utm[_ ]?campanha|^campanha$|^campaign$|origem da campanha/.test(x); });
   var valueIdx = src.colunaValor ? normed.indexOf(norm(src.colunaValor)) : normed.findIndex(function (x) { return /valor da venda|valor venda|receita|ticket|valor fechado/.test(x); });
   st.headers = header; st.map = { date: map.date, status: statusIdx > -1 ? statusIdx : undefined, value: valueIdx > -1 ? valueIdx : undefined }; st.headerRow = h;
   if (map.date == null) { st.error = L('Nenhuma coluna de data encontrada.', 'No se encontró columna de fecha.'); return []; }
@@ -465,11 +524,14 @@ function processCRM(src, text) {
   rows.slice(h + 1).forEach(function (r) {
     var d = parseDate(r[map.date]); if (!d) return;
     var s = statusIdx > -1 ? norm(r[statusIdx]) : '';
-    var sale = statusIdx > -1 && SALE_RE.test(s), qual = sale || (statusIdx > -1 && QUAL_RE.test(s));
+    var sale = forcaVenda || (statusIdx > -1 && SALE_RE.test(s));
+    var qual = sale || forcaQual || (statusIdx > -1 && QUAL_RE.test(s));
     var raw = {}; header.forEach(function (hh, j) { raw[hh] = r[j] == null ? '' : r[j]; });
-    out.push({ date: d, funnel: src.funil || 'cadastro', sale: sale, qual: qual, value: (sale && valueIdx > -1) ? num(r[valueIdx]) : 0, status: statusIdx > -1 ? String(r[statusIdx]).trim() : '', raw: raw, src: src.nome || '' });
+    out.push({ date: d, funnel: src.funil || 'cadastro', sale: sale, qual: qual, value: (sale && valueIdx > -1) ? num(r[valueIdx]) : 0, status: statusIdx > -1 ? String(r[statusIdx]).trim() : '', utm: utmIdx > -1 ? String(r[utmIdx] || '').trim() : '', etapa: src.etapa || '', raw: raw, src: src.nome || '' });
   });
-  st.rows = out.length; st.hasStatus = statusIdx > -1;
+  st.rows = out.length; st.hasStatus = statusIdx > -1 || forcaQual || forcaVenda;
+  st.map.campanha = utmIdx > -1 ? utmIdx : undefined;
+  st.etapa = src.etapa || '';
   return out;
 }
 function processGConv(src, text) {
@@ -688,7 +750,8 @@ function buildFunnel(f, per) {
     if (crmSrc) st('crm', L('Chegaram ao comercial', 'Llegaron a ventas'), crmCur.n, crmPrev.n, resKey, null, { rateKey: 'crm' });
     else st('crm', L('Chegaram ao comercial', 'Llegaron a ventas'), null, null, resKey, null, { missing: 'crm' });
     if (crmStatus) {
-      st('qual', L('Qualificados', 'Calificados'), crmCur.qual, crmPrev.qual, 'crm', BENCH.qualRate, { rateKey: 'qual' });
+      var fonteQual = STATE.sources.filter(function (x) { return x.tipo === 'crm' && x.status && x.status.etapa; })[0];
+      st('qual', L('Qualificados', 'Calificados') + (fonteQual ? nota(L('Os qualificados vêm de uma lista própria (', 'Los calificados vienen de una lista propia (') + esc(fonteQual.nome || fonteQual.etapa) + L('), separada da lista de cadastros. Se um contato qualificado não estiver também na lista de cadastros, a taxa de passagem entre as duas etapas fica subestimada.', '), separada de la lista de registros. Si un contacto calificado no está también en la lista de registros, la tasa de paso entre las dos etapas queda subestimada.')) : ''), crmCur.qual, crmPrev.qual, 'crm', BENCH.qualRate, { rateKey: 'qual' });
       st('sale', L('Compraram', 'Compraron'), crmCur.sale, crmPrev.sale, 'qual', BENCH.saleRate, { rateKey: 'sale', sale: true });
     } else {
       st('qual', L('Qualificados', 'Calificados'), null, null, 'crm', null, { missing: 'qual' });
@@ -1027,6 +1090,14 @@ function insightHTML(i) {
   return '<div class="ins ' + i.t + '"><b>' + (i.t === 'att' ? '⚠ ' : i.t === 'pos' ? '✓ ' : '◐ ') + esc(i.title) + '</b><div>' + i.body + '</div>' + (i.act ? '<div class="act">→ ' + esc(i.act) + '</div>' : '') + '</div>';
 }
 /* Tabela com 1ª coluna fixa e aviso de "arraste" quando não cabe na tela */
+/* Marcador discreto de ressalva. Fica quase invisível na leitura normal e só
+   explica quando a pessoa passa o mouse (ou toca, no celular). A ideia é usar o
+   dado que existe em vez de esconder o bloco, mas sem deixar quem lê achar que
+   o número é mais firme do que é. */
+function nota(txt) {
+  if (!txt) return '';
+  return '<span class="nt" tabindex="0" role="button" title="' + esc(String(txt).replace(/<[^>]+>/g, '')) + '">?<span class="ntx">' + txt + '</span></span>';
+}
 function tableWrap(inner) { return '<div class="tw"><div class="tw-hint">' + L('arraste para o lado →', 'deslizá hacia el costado →') + '</div><div class="sc">' + inner + '</div></div>'; }
 function enhanceTables() {
   $$('.tw, .hsw').forEach(function (w) {
@@ -1036,6 +1107,11 @@ function enhanceTables() {
     upd();
   });
   $$('.kpi .i').forEach(function (b) { if (!b._dz) { b._dz = 1; b.onclick = function () { b.closest('.kpi').classList.toggle('showh'); reportHeight(); }; } });
+  $$('.nt').forEach(function (b) {
+    if (b._dz) return; b._dz = 1;
+    b.onclick = function (e) { e.stopPropagation(); var abrir = !b.classList.contains('on'); $$('.nt').forEach(function (x) { x.classList.remove('on'); }); if (abrir) b.classList.add('on'); };
+  });
+  if (!ROOT._ntbind) { ROOT._ntbind = 1; ROOT.addEventListener('click', function () { $$('.nt').forEach(function (x) { x.classList.remove('on'); }); }); }
 }
 /* Nomes longos quebram só nos separadores, nunca no meio da palavra */
 function nameHTML(n) { return esc(n).replace(/\]/g, ']<wbr>').replace(/\|/g, '|<wbr>').replace(/_/g, '_<wbr>'); }
@@ -1507,14 +1583,75 @@ function isQuestionField(h) {
   var n = norm(h); if (!n) return false;
   var skip = ['nome', 'nome completo', 'name', 'full name', 'email', 'e-mail', 'telefone', 'phone', 'celular', 'whatsapp', 'data', 'dia', 'date', 'timestamp', 'created time', 'created at', 'data de cadastro', 'data de inscricao', 'horario de envio', 'id', 'lead id', 'form id', 'campanha', 'campaign', 'conjunto de anuncios', 'ad set', 'adset', 'anuncio', 'ad name', 'conta', 'account', 'plataforma', 'platform'];
   if (skip.indexOf(n) > -1) return false;
-  if (/utm|fbclid|gclid|\bid\b|pixel|posicionamento|placement|criativo|creative|permalink|url|link|\bip\b|user agent|dispositivo|device|e-?mail|telefone|phone|celular|whatsapp|nome|name/.test(n)) return false;
+  if (/utm|fbclid|gclid|gbraid|wbraid|^fbc$|^fbp$|event_?id|adset|adgroup|ad_?id|matchtype|network|site_?source|landing_?page|referrer|\bid\b|pixel|posicionamento|placement|criativo|creative|permalink|url|link|\bip\b|user agent|dispositivo|device|e-?mail|telefone|phone|celular|whatsapp|nome|name/.test(n)) return false;
   return true;
+}
+/* Pizza (rosca) para perguntas com poucas respostas distintas. Acima de 6 fatias
+   a pizza fica ilegível e o gráfico de barras lê melhor, então o motor troca
+   sozinho conforme o número de respostas. */
+var DONUT_MAX = 6;
+function donutHTML(entries, answered) {
+  var size = 168, r = 62, cx = size / 2, cy = size / 2, C = 2 * Math.PI * r, off = 0;
+  var segs = '', legend = '';
+  entries.forEach(function (e, i) {
+    var frac = answered > 0 ? e[1] / answered : 0, len = C * frac;
+    var op = 1 - (i * 0.14); if (op < 0.28) op = 0.28;
+    segs += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="var(--ac)" stroke-opacity="' + op.toFixed(2) +
+      '" stroke-width="26" stroke-dasharray="' + len.toFixed(2) + ' ' + (C - len).toFixed(2) + '" stroke-dashoffset="' + (-off).toFixed(2) +
+      '" transform="rotate(-90 ' + cx + ' ' + cy + ')"></circle>';
+    off += len;
+    legend += '<div class="dlg"><span class="dot" style="background:var(--ac);opacity:' + op.toFixed(2) + '"></span>' +
+      '<span class="dl">' + nameHTML(e[0]) + '</span><b>' + pctf(frac, 0) + '</b><span class="dn">' + e[1] + '</span></div>';
+  });
+  return '<div class="donut"><svg viewBox="0 0 ' + size + ' ' + size + '" width="' + size + '" height="' + size + '">' + segs +
+    '<text x="' + cx + '" y="' + (cy - 2) + '" text-anchor="middle" class="dtx">' + answered + '</text>' +
+    '<text x="' + cx + '" y="' + (cy + 15) + '" text-anchor="middle" class="dtx2">' + L('respostas', 'respuestas') + '</text></svg>' +
+    '<div class="dleg">' + legend + '</div></div>';
+}
+
+function notaResp(answered, total) {
+  if (!total || answered >= total * 0.7) return '';
+  return nota(L('Só ', 'Solo ') + pctf(answered / total, 0) + L(' dos cadastros responderam esta pergunta. A distribuição mostra o perfil de quem respondeu, que pode não representar o grupo inteiro.', ' de los registros respondieron esta pregunta. La distribución muestra el perfil de quien respondió, que puede no representar al grupo entero.'));
 }
 function renderCRM(per) {
   var v = $('#v-crm'); if (!v) return;
-  var now = STATE.crm.filter(function (c) { return inRange(c.date, per.from, per.to); }), prev = STATE.crm.filter(function (c) { return inRange(c.date, per.pFrom, per.pTo); });
+  // campanhas presentes na coluna de UTM, para permitir olhar só uma delas
+  var camps = {}, temUtm = false;
+  STATE.crm.forEach(function (c) { if (c.utm) { temUtm = true; camps[c.utm] = (camps[c.utm] || 0) + 1; } });
+  var lista = Object.keys(camps).sort(function (a, b) { return camps[b] - camps[a]; });
+  var sel = STATE.crmUtm && lista.indexOf(STATE.crmUtm) > -1 ? STATE.crmUtm : 'all';
+  var byUtm = function (c) { return sel === 'all' || c.utm === sel; };
+
+  var now = STATE.crm.filter(function (c) { return inRange(c.date, per.from, per.to) && byUtm(c); }),
+      prev = STATE.crm.filter(function (c) { return inRange(c.date, per.pFrom, per.pTo) && byUtm(c); });
   var hasStatus = STATE.sources.some(function (x) { return x.tipo === 'crm' && x.status.hasStatus; });
-  var html = legendHTML(per) +
+
+  // quantos leads do período realmente têm campanha registrada
+  function cobUtm() {
+    var todos = STATE.crm.filter(function (c) { return inRange(c.date, per.from, per.to); });
+    var com = todos.filter(function (c) { return c.utm; }).length;
+    if (!todos.length || com === todos.length) return '';
+    var porFonte = {};
+    todos.forEach(function (c) { var k = c.src || '—'; porFonte[k] = porFonte[k] || { t: 0, c: 0 }; porFonte[k].t++; if (c.utm) porFonte[k].c++; });
+    var det = Object.keys(porFonte).map(function (k) { return esc(k) + ': ' + porFonte[k].c + '/' + porFonte[k].t; }).join(' · ');
+    return '<p class="mut" style="font-size:12.5px;margin-top:8px">' + com + L(' de ', ' de ') + todos.length + L(' cadastros têm campanha registrada', ' registros tienen campaña registrada') +
+      nota(L('Os cadastros sem UTM não entram em nenhum filtro de campanha, então os números por campanha somam menos que o total. Isso vem da captura no formulário, não do relatório. Por fonte: ', 'Los registros sin UTM no entran en ningún filtro de campaña, así que los números por campaña suman menos que el total. Viene de la captura en el formulario, no del reporte. Por fuente: ') + det) + '</p>';
+  }
+
+  var filtro = '';
+  if (temUtm && lista.length > 1) {
+    filtro = '<div class="card"><h3>' + L('Campanha de origem', 'Campaña de origen') + '</h3>' +
+      '<p class="mut" style="font-size:12.5px">' + L('Vem da UTM registrada no cadastro. Escolha uma campanha para ver o perfil só dos contatos que ela trouxe.', 'Viene de la UTM registrada en el registro. Elegí una campaña para ver el perfil solo de los contactos que trajo.') + '</p>' +
+      cobUtm() +
+      '<div class="hsw"><div class="pills scrollx hs" style="margin-top:10px">' +
+      '<button class="pill' + (sel === 'all' ? ' on' : '') + '" data-utm="all">' + L('Todas', 'Todas') + '</button>' +
+      lista.map(function (u) { return '<button class="pill' + (sel === u ? ' on' : '') + '" data-utm="' + esc(u) + '">' + nameHTML(pretty(u)) + ' <span class="mut">' + camps[u] + '</span></button>'; }).join('') +
+      '</div></div></div>';
+  } else if (temUtm && lista.length === 1) {
+    filtro = '<div class="card"><p class="mut" style="margin:0;font-size:13px">' + L('Todos os cadastros do período vieram da campanha ', 'Todos los registros del período vinieron de la campaña ') + '<b style="color:var(--tx)">' + nameHTML(pretty(lista[0])) + '</b>.</p></div>';
+  }
+
+  var html = filtro + legendHTML(per) +
     '<div class="grid">' + kpi(L('Cadastros recebidos', 'Registros recibidos'), now.length, prev.length, count, false, L('na lista do comercial', 'en la lista de ventas')) +
     kpiSimple(L('Ritmo', 'Ritmo'), perDayTxt(now.length / per.len, L('cadastro', 'registro'), L('cadastros', 'registros')), '', L('antes: ', 'antes: ') + perDayTxt(prev.length / per.pLen, L('cadastro', 'registro'), L('cadastros', 'registros')));
   if (hasStatus) html += kpi(L('Com perfil', 'Con perfil'), now.filter(function (c) { return c.qual; }).length, prev.filter(function (c) { return c.qual; }).length, count) + kpi(L('Viraram venda', 'Se convirtieron en venta'), now.filter(function (c) { return c.sale; }).length, prev.filter(function (c) { return c.sale; }).length, count);
@@ -1529,15 +1666,21 @@ function renderCRM(per) {
       var counts = {}, answered = 0;
       fields[k].forEach(function (x) { var t = String(x == null ? '' : x).trim(); if (!t || t === '-' || (parseDate(t) && /\d{4}|\d\/\d/.test(t))) return; t = pretty(t); answered++; counts[t] = (counts[t] || 0) + 1; });
       var e = Object.keys(counts).map(function (x) { return [x, counts[x]]; }).sort(function (a, b) { return b[1] - a[1]; });
-      if (!e.length || e.length > 15 || (e.length === answered && answered > 3)) return;
+      // resposta quase sempre diferente = texto livre, não categoria
+      if (!e.length || e.length > 15 || (answered > 3 && e.length / answered > 0.6)) return;
       var max = e[0][1];
-      charts += '<div class="card"><h3>' + esc(pretty(k)) + '</h3><p class="mut" style="font-size:12px">' + answered + L(' de ', ' de ') + now.length + L(' responderam', ' respondieron') + '</p>' +
+      if (e.length <= DONUT_MAX) {
+        charts += '<div class="card"><h3>' + esc(pretty(k)) + '</h3><p class="mut" style="font-size:12px">' + answered + L(' de ', ' de ') + now.length + L(' responderam', ' respondieron') + notaResp(answered, now.length) + '</p>' + donutHTML(e, answered) + '</div>';
+        return;
+      }
+      charts += '<div class="card"><h3>' + esc(pretty(k)) + '</h3><p class="mut" style="font-size:12px">' + answered + L(' de ', ' de ') + now.length + L(' responderam', ' respondieron') + notaResp(answered, now.length) + '</p>' +
         e.map(function (x) { return '<div class="brow"><div class="bl"><span>' + nameHTML(x[0]) + '</span><span>' + x[1] + ' · ' + pctf(x[1] / answered, 0) + '</span></div><div class="paceBar" style="margin:0;height:8px"><span style="width:' + (x[1] / max * 100) + '%;background:var(--ac)"></span></div></div>'; }).join('') + '</div>';
     });
     if (charts) html += '<div class="sec">' + L('O que as pessoas responderam', 'Lo que respondieron') + '</div><div class="grid g2">' + charts + '</div>';
   }
   if (!hasStatus) html = whyAlertHTML(['cadastro'], per) + html;
   v.innerHTML = html;
+  $$('[data-utm]', v).forEach(function (b) { b.onclick = function () { STATE.crmUtm = b.dataset.utm === 'all' ? null : b.dataset.utm; renderCRM(per); enhanceTables(); reportHeight(); }; });
   bindWhy(v);
 }
 /* ============================== RITMO DE VERBA ============================== */
@@ -1638,7 +1781,11 @@ function renderSocial(per) {
   Object.keys(STATE.socRedes).forEach(function (rd) { var g = followersGain(rd, per.from, per.to); if (g != null) { ganhos += g; temGanho = true; } });
   if (temGanho) frase += ' ' + L('O perfil ganhou ', 'El perfil ganó ') + '<b>' + count(ganhos) + '</b> ' + L('seguidores.', 'seguidores.');
 
-  var html = '<div class="card hl"><div class="hero-t">' + L('Redes sociais no período', 'Redes sociales en el período') + '</div><p class="hero" style="margin:0">' + frase + '</p></div>';
+  var dups = STATE.sources.filter(function (x) { return (x.tipo === 'social' || x.tipo === 'engajamento') && x.status && x.status.dup > 0; });
+  var ntDup = dups.length ? nota(L('Linhas repetidas foram ignoradas na leitura destas planilhas: ', 'Se ignoraron filas repetidas al leer estas planillas: ') +
+    dups.map(function (x) { return esc(x.nome || x.rede) + ' (' + x.status.dup + ')'; }).join(' · ') +
+    L('. Os números aqui já estão corrigidos, mas a origem continua gravando repetido.', '. Los números de acá ya están corregidos, pero el origen sigue grabando repetido.')) : '';
+  var html = '<div class="card hl"><div class="hero-t">' + L('Redes sociais no período', 'Redes sociales en el período') + ntDup + '</div><p class="hero" style="margin:0">' + frase + '</p></div>';
 
   // composição orgânico x pago
   if (temPago && totInt > 0) {
@@ -1670,7 +1817,12 @@ function renderSocial(per) {
         var g = followersGain(rd, per.from, per.to);
         var snaps = socIn(per.from, per.to, function (r) { return r.rede === rd && ok(r.followersTotal) && r.followersTotal > 0; });
         var hoje = snaps.length ? snaps[snaps.length - 1].followersTotal : null;
-        return '<tr><td>' + redeNome(rd) + '</td>' + ms.map(function (m) { return '<td>' + (ok(a[m.k]) ? count(a[m.k]) : '—') + '</td>'; }).join('') +
+        var congelado = STATE.sources.some(function (x) { return norm(x.rede || '') === rd && x.status && x.status.followersFrozen; });
+        var diasComDado = socIn(per.from, per.to, function (r) { return r.rede === rd; }).reduce(function (a, r) { if (a.indexOf(r.date) < 0) a.push(r.date); return a; }, []).length;
+        var nt = '';
+        if (congelado) nt += nota(L('A extração repete o total de seguidores de hoje em todas as linhas, então esse campo é um retrato e não uma curva. O ganho do período vem do campo diário de novos seguidores, quando existe.', 'La extracción repite el total de seguidores de hoy en todas las filas, así que ese campo es una foto y no una curva. La ganancia del período viene del campo diario de nuevos seguidores, cuando existe.'));
+        if (diasComDado > 0 && diasComDado < per.len * 0.8) nt += nota(L('Há dado em ', 'Hay dato en ') + diasComDado + L(' dos ', ' de los ') + per.len + L(' dias do período. Ou a extração só traz dias com publicação, ou houve dias sem postar: nos dois casos a média diária fica distorcida.', ' días del período. O la extracción solo trae días con publicación, o hubo días sin postear: en los dos casos el promedio diario queda distorsionado.'));
+        return '<tr><td>' + redeNome(rd) + nt + '</td>' + ms.map(function (m) { return '<td>' + (ok(a[m.k]) ? count(a[m.k]) : '—') + '</td>'; }).join('') +
           '<td>' + (g == null ? '—' : count(g)) + '</td><td>' + (hoje == null ? '—' : count(hoje)) + '</td></tr>';
       }).join('') + '</tbody></table>') +
       '<p class="mut" style="font-size:12.5px;margin-top:10px">' + L('“Seguidores hoje” é o retrato mais recente do período. Quando a extração repete o mesmo total em todos os dias, esse número serve como retrato, não como curva.', '“Seguidores hoy” es la foto más reciente del período. Cuando la extracción repite el mismo total todos los días, ese número sirve como foto, no como curva.') + '</p></div>';
@@ -1726,6 +1878,7 @@ function renderDiag() {
   STATE.sources.forEach(function (s) {
     var st = s.status || {}, map = st.map || {}, h = st.headers || [];
     html += '<div class="card"><div class="bar"><h3>' + (st.ok ? '✓ ' : '✗ ') + esc(s.nome || s.conta || s.plataforma || s.tipo) + ' <span class="tag">' + esc(s.tipo) + (s.funil ? ' · ' + esc(s.funil) : '') + '</span></h3><span class="' + (st.ok ? 'up' : 'down') + '" style="font-size:12.5px">' + (st.ok ? count(st.rows) + L(' linhas', ' filas') + (st.dup ? ' · ' + st.dup + L(' duplicadas ignoradas', ' duplicadas ignoradas') : '') + (st.fromPaste ? ' · ' + L('usando CSV colado', 'usando CSV pegado') : '') : esc(st.error || '')) + '</span></div>';
+    if (st.dateCol) html += '<p class="mut" style="font-size:12px;margin-top:8px">' + L('Coluna de data em uso: ', 'Columna de fecha en uso: ') + '<b style="color:var(--tx)">' + esc(st.dateCol) + '</b>' + (st.dateScore != null && st.dateScore < 0.95 ? ' · ' + pctf(st.dateScore, 0) + L(' das linhas com data válida', ' de las filas con fecha válida') : '') + '</p>';
     if (h.length) html += '<p class="mut" style="font-size:12px;margin-top:8px">' + L('Colunas reconhecidas: ', 'Columnas reconocidas: ') + Object.keys(map).filter(function (k) { return map[k] != null; }).map(function (k) { return '<b style="color:var(--tx)">' + k + '</b> ← ' + esc(h[map[k]]); }).join(' · ') + (st.locale ? ' · ' + L('decimal: ', 'decimal: ') + (st.locale === 'comma' ? '1.234,56' : '1,234.56') : '') + (s.tipo === 'crm' ? ' · ' + (st.hasStatus ? L('coluna de status encontrada', 'columna de estado encontrada') : L('sem coluna de status', 'sin columna de estado')) : '') + '</p>';
     html += '<details style="margin-top:8px"><summary class="mut" style="cursor:pointer;font-size:12.5px">' + L('Colar CSV manualmente', 'Pegar CSV manualmente') + '</summary><textarea data-paste="' + s.id + '" placeholder="CSV">' + esc(store.get('paste_' + s.id, '')) + '</textarea><div class="row" style="margin-top:6px"><button class="btn" data-save="' + s.id + '">' + L('Usar este CSV', 'Usar este CSV') + '</button><button class="btn" data-clear="' + s.id + '">' + L('Voltar à leitura automática', 'Volver a la lectura automática') + '</button></div></details></div>';
   });
