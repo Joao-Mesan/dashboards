@@ -6,7 +6,7 @@
 (function () {
 'use strict';
 
-var VERSION = '1.8.1';
+var VERSION = '1.9.0';
 var D = window.DASH || {};
 var ROOT = document.getElementById(D.elemento || 'dash');
 if (!ROOT) return;
@@ -579,6 +579,11 @@ function processSocial(src, text) {
     var d = parseDate(r[map.date]); if (!d) return;
     var o = { date: d, rede: rede, origem: origem, fonte: src.nome || src.rede || src.tipo };
     SOC_FIELDS.forEach(function (f) { o[f] = map[f] != null ? num(r[map[f]]) : null; });
+    // sem coluna de total, engajamento é a soma das partes que existirem
+    if (o.interactions == null) {
+      var partes = ['likes', 'comments', 'shares', 'saves'].filter(function (f) { return ok(o[f]); });
+      if (partes.length) o.interactions = partes.reduce(function (a, f) { return a + o[f]; }, 0);
+    }
     // uma linha por dia por fonte: se vier repetida (planilha que sobrescreve
     // em vez de substituir), a última vence e a anterior é contada como duplicata
     if (byDate[d]) dup++;
@@ -592,6 +597,7 @@ function processSocial(src, text) {
   st.followersFrozen = tots.length > 2 && tots.every(function (v) { return v === tots[0]; });
   st.rows = out.length; st.dup = dup; st.origem = origem; st.rede = rede;
   SOC_FIELDS.forEach(function (f) { if (map[f] != null) STATE.hasSoc[f] = true; });
+  if (out.length && out.some(function (x) { return ok(x.interactions); })) STATE.hasSoc.interactions = true;
   if (out.length) STATE.socRedes[rede] = true;
   return out;
 }
@@ -1646,43 +1652,34 @@ function isQuestionField(h) {
    sozinho conforme o número de respostas. */
 var DONUT_MAX = 6;
 function donutHTML(entries, answered) {
-  var size = 168, r = 62, cx = size / 2, cy = size / 2, C = 2 * Math.PI * r, off = 0;
-  var segs = '', legend = '';
+  var S = 170, cx = S / 2, cy = S / 2, rOut = 78, rIn = 48, ac = AC;
+  function ponto(r, ang) { var a = (ang - 90) * Math.PI / 180; return [(cx + r * Math.cos(a)).toFixed(2), (cy + r * Math.sin(a)).toFixed(2)]; }
+  function fatia(ini, fim) {
+    if (fim - ini >= 359.999) {   // fatia única: anel inteiro, arco não fecha sozinho
+      return 'M' + cx + ' ' + (cy - rOut) + ' A' + rOut + ' ' + rOut + ' 0 1 1 ' + (cx - 0.01) + ' ' + (cy - rOut) + ' Z' +
+             'M' + cx + ' ' + (cy - rIn) + ' A' + rIn + ' ' + rIn + ' 0 1 0 ' + (cx - 0.01) + ' ' + (cy - rIn) + ' Z';
+    }
+    var g = fim - ini > 180 ? 1 : 0;
+    var a = ponto(rOut, ini), b = ponto(rOut, fim), c = ponto(rIn, fim), d = ponto(rIn, ini);
+    return 'M' + a[0] + ' ' + a[1] + ' A' + rOut + ' ' + rOut + ' 0 ' + g + ' 1 ' + b[0] + ' ' + b[1] +
+           ' L' + c[0] + ' ' + c[1] + ' A' + rIn + ' ' + rIn + ' 0 ' + g + ' 0 ' + d[0] + ' ' + d[1] + ' Z';
+  }
+  var ang = 0, paths = '', legend = '';
   entries.forEach(function (e, i) {
-    var frac = answered > 0 ? e[1] / answered : 0, len = C * frac;
-    var op = 1 - (i * 0.14); if (op < 0.28) op = 0.28;
-    segs += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="var(--ac)" stroke-opacity="' + op.toFixed(2) +
-      '" stroke-width="26" stroke-dasharray="' + len.toFixed(2) + ' ' + (C - len).toFixed(2) + '" stroke-dashoffset="' + (-off).toFixed(2) +
-      '" transform="rotate(-90 ' + cx + ' ' + cy + ')"></circle>';
-    off += len;
-    legend += '<div class="dlg"><span class="dot" style="background:var(--ac);opacity:' + op.toFixed(2) + '"></span>' +
+    var frac = answered > 0 ? e[1] / answered : 0, gr = frac * 360;
+    var op = Math.max(0.3, 1 - i * 0.16);
+    if (gr > 0.2) paths += '<path d="' + fatia(ang, ang + gr) + '" fill="' + ac + '" fill-opacity="' + op.toFixed(2) + '"></path>';
+    ang += gr;
+    legend += '<div class="dlg"><span class="dot" style="background:' + ac + ';opacity:' + op.toFixed(2) + '"></span>' +
       '<span class="dl">' + nameHTML(e[0]) + '</span><b>' + pctf(frac, 0) + '</b><span class="dn">' + e[1] + '</span></div>';
   });
-  return '<div class="donut"><svg viewBox="0 0 ' + size + ' ' + size + '" width="' + size + '" height="' + size + '">' + segs +
-    '<text x="' + cx + '" y="' + (cy - 2) + '" text-anchor="middle" class="dtx">' + answered + '</text>' +
-    '<text x="' + cx + '" y="' + (cy + 15) + '" text-anchor="middle" class="dtx2">' + L('respostas', 'respuestas') + '</text></svg>' +
+  return '<div class="donut"><svg viewBox="0 0 ' + S + ' ' + S + '" width="' + S + '" height="' + S + '" style="width:' + S + 'px;height:' + S + 'px;flex:0 0 auto;display:block">' +
+    paths +
+    '<text x="' + cx + '" y="' + (cy - 1) + '" text-anchor="middle" fill="#fff" font-size="21" font-weight="600">' + answered + '</text>' +
+    '<text x="' + cx + '" y="' + (cy + 16) + '" text-anchor="middle" fill="#9a9aa6" font-size="11">' + L('respostas', 'respuestas') + '</text></svg>' +
     '<div class="dleg">' + legend + '</div></div>';
 }
 
-/* Escolha de quais perguntas do formulário viram gráfico.
-   window.DASH.perguntas = ['Investimento']  -> mostra só essas (lista branca)
-   window.DASH.perguntasOcultas = ['Andamento'] -> esconde essas
-   Sem nenhuma das duas, o motor decide sozinho como antes.
-   A comparação ignora acentos e maiúsculas e aceita trecho do nome. */
-function campoPermitido(k) {
-  var n = norm(k);
-  var brancas = D.perguntas, negras = D.perguntasOcultas;
-  if (Array.isArray(brancas)) {
-    if (!brancas.length) return false;
-    return brancas.some(function (q) { var nq = norm(q); return nq && (n === nq || n.indexOf(nq) > -1); });
-  }
-  if (Array.isArray(negras) && negras.some(function (q) { var nq = norm(q); return nq && (n === nq || n.indexOf(nq) > -1); })) return false;
-  return isQuestionField(k);
-}
-function notaResp(answered, total) {
-  if (!total || answered >= total * 0.7) return '';
-  return nota(L('Só ', 'Solo ') + pctf(answered / total, 0) + L(' dos cadastros responderam esta pergunta. A distribuição mostra o perfil de quem respondeu, que pode não representar o grupo inteiro.', ' de los registros respondieron esta pregunta. La distribución muestra el perfil de quien respondió, que puede no representar al grupo entero.'));
-}
 function renderCRM(per) {
   var v = $('#v-crm'); if (!v) return;
   // campanhas presentes na coluna de UTM, para permitir olhar só uma delas
@@ -1749,7 +1746,8 @@ function renderCRM(per) {
       // resposta quase sempre diferente = texto livre, não categoria
       if (!e.length || e.length > 15 || (answered > 3 && e.length / answered > 0.6)) return;
       var max = e[0][1];
-      if (e.length <= DONUT_MAX) {
+      var dominante = e[0][1] / (answered || 1);
+      if (e.length >= 2 && e.length <= DONUT_MAX && dominante <= 0.9) {
         charts += '<div class="card"><h3>' + esc(pretty(k)) + '</h3><p class="mut" style="font-size:12px">' + answered + L(' de ', ' de ') + now.length + L(' responderam', ' respondieron') + notaResp(answered, now.length) + '</p>' + donutHTML(e, answered) + '</div>';
         return;
       }
@@ -1820,13 +1818,14 @@ function renderPace() {
 }
 
 /* ============================== REDES SOCIAIS (ABA) ============================== */
+/* Curtidas, comentários, compartilhamentos e salvamentos separados poluem sem
+   informar: o Facebook não entrega nenhum deles e as colunas ficam zeradas. O
+   que o cliente entende é engajamento, visualizações e seguidores. Os detalhes
+   ficam somados dentro de "engajamento". */
 var SOC_METRICS = function () { return [
   { k: 'interactions', n: L('Interações', 'Interacciones'), help: L('Curtidas, comentários, compartilhamentos e salvamentos somados.', 'Me gusta, comentarios, compartidos y guardados sumados.') },
   { k: 'views', n: L('Visualizações', 'Visualizaciones'), help: L('Quantas vezes o conteúdo foi visto.', 'Cuántas veces se vio el contenido.') },
-  { k: 'likes', n: L('Curtidas', 'Me gusta'), help: '' },
-  { k: 'comments', n: L('Comentários', 'Comentarios'), help: '' },
-  { k: 'shares', n: L('Compartilhamentos', 'Compartidos'), help: '' },
-  { k: 'saves', n: L('Salvamentos', 'Guardados'), help: L('Quem salvou o post para ver depois. É o sinal mais forte de interesse.', 'Quien guardó el post para ver después. Es la señal más fuerte de interés.') }
+  { k: 'followersNew', n: L('Seguidores ganhos', 'Seguidores ganados'), help: L('Novos seguidores no período.', 'Nuevos seguidores en el período.') }
 ].filter(function (m) { return STATE.hasSoc[m.k]; }); };
 
 function redeNome(r) { return r === 'instagram' ? 'Instagram' : r === 'facebook' ? 'Facebook' : r === 'meta' ? 'Meta Ads' : cap(r); }
@@ -1889,9 +1888,13 @@ function renderSocial(per) {
 
   // por rede
   var redes = Object.keys(STATE.socRedes).filter(function (r) { return r !== 'meta'; });
+  // só entram colunas em que alguma rede tem número
+  var cols = ms.filter(function (m) {
+    return m.k !== 'followersNew' && redes.some(function (rd) { var a = socAgg(socIn(per.from, per.to, function (r) { return r.rede === rd; })); return ok(a[m.k]) && a[m.k] > 0; });
+  });
   if (redes.length) {
     html += '<div class="card"><h2>' + L('Por rede', 'Por red') + '</h2>' + tableWrap('<table><thead><tr><th>' + L('Rede', 'Red') + '</th>' +
-      ms.map(function (m) { return '<th>' + m.n + '</th>'; }).join('') + '<th>' + L('Seguidores ganhos', 'Seguidores ganados') + '</th><th>' + L('Seguidores hoje', 'Seguidores hoy') + '</th></tr></thead><tbody>' +
+      cols.map(function (m) { return '<th>' + m.n + '</th>'; }).join('') + '<th>' + L('Seguidores ganhos', 'Seguidores ganados') + '</th><th>' + L('Seguidores hoje', 'Seguidores hoy') + '</th></tr></thead><tbody>' +
       redes.map(function (rd) {
         var a = socAgg(socIn(per.from, per.to, function (r) { return r.rede === rd; }));
         var g = followersGain(rd, per.from, per.to);
@@ -1902,7 +1905,7 @@ function renderSocial(per) {
         var nt = '';
         if (congelado) nt += nota(L('A extração repete o total de seguidores de hoje em todas as linhas, então esse campo é um retrato e não uma curva. O ganho do período vem do campo diário de novos seguidores, quando existe.', 'La extracción repite el total de seguidores de hoy en todas las filas, así que ese campo es una foto y no una curva. La ganancia del período viene del campo diario de nuevos seguidores, cuando existe.'));
         if (diasComDado > 0 && diasComDado < per.len * 0.8) nt += nota(L('Há dado em ', 'Hay dato en ') + diasComDado + L(' dos ', ' de los ') + per.len + L(' dias do período. Ou a extração só traz dias com publicação, ou houve dias sem postar: nos dois casos a média diária fica distorcida.', ' días del período. O la extracción solo trae días con publicación, o hubo días sin postear: en los dos casos el promedio diario queda distorsionado.'));
-        return '<tr><td>' + redeNome(rd) + nt + '</td>' + ms.map(function (m) { return '<td>' + (ok(a[m.k]) ? count(a[m.k]) : '—') + '</td>'; }).join('') +
+        return '<tr><td>' + redeNome(rd) + nt + '</td>' + cols.map(function (m) { return '<td>' + (ok(a[m.k]) && a[m.k] > 0 ? count(a[m.k]) : '—') + '</td>'; }).join('') +
           '<td>' + (g == null ? '—' : count(g)) + '</td><td>' + (hoje == null ? '—' : count(hoje)) + '</td></tr>';
       }).join('') + '</tbody></table>') +
       '<p class="mut" style="font-size:12.5px;margin-top:10px">' + L('“Seguidores hoje” é o retrato mais recente do período. Quando a extração repete o mesmo total em todos os dias, esse número serve como retrato, não como curva.', '“Seguidores hoy” es la foto más reciente del período. Cuando la extracción repite el mismo total todos los días, ese número sirve como foto, no como curva.') + '</p></div>';
