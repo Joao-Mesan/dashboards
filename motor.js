@@ -6,7 +6,7 @@
 (function () {
 'use strict';
 
-var VERSION = '1.7.0';
+var VERSION = '1.7.1';
 var D = window.DASH || {};
 var ROOT = document.getElementById(D.elemento || 'dash');
 if (!ROOT) return;
@@ -1609,6 +1609,21 @@ function donutHTML(entries, answered) {
     '<div class="dleg">' + legend + '</div></div>';
 }
 
+/* Escolha de quais perguntas do formulário viram gráfico.
+   window.DASH.perguntas = ['Investimento']  -> mostra só essas (lista branca)
+   window.DASH.perguntasOcultas = ['Andamento'] -> esconde essas
+   Sem nenhuma das duas, o motor decide sozinho como antes.
+   A comparação ignora acentos e maiúsculas e aceita trecho do nome. */
+function campoPermitido(k) {
+  var n = norm(k);
+  var brancas = D.perguntas, negras = D.perguntasOcultas;
+  if (Array.isArray(brancas)) {
+    if (!brancas.length) return false;
+    return brancas.some(function (q) { var nq = norm(q); return nq && (n === nq || n.indexOf(nq) > -1); });
+  }
+  if (Array.isArray(negras) && negras.some(function (q) { var nq = norm(q); return nq && (n === nq || n.indexOf(nq) > -1); })) return false;
+  return isQuestionField(k);
+}
 function notaResp(answered, total) {
   if (!total || answered >= total * 0.7) return '';
   return nota(L('Só ', 'Solo ') + pctf(answered / total, 0) + L(' dos cadastros responderam esta pergunta. A distribuição mostra o perfil de quem respondeu, que pode não representar o grupo inteiro.', ' de los registros respondieron esta pregunta. La distribución muestra el perfil de quien respondió, que puede no representar al grupo entero.'));
@@ -1662,7 +1677,7 @@ function renderCRM(per) {
     now.forEach(function (c) { Object.keys(c.raw || {}).forEach(function (k) { if (!fields[k]) { fields[k] = []; order.push(k); } fields[k].push(c.raw[k]); }); });
     var charts = '';
     order.forEach(function (k) {
-      if (!isQuestionField(k)) return;
+      if (!campoPermitido(k)) return;
       var counts = {}, answered = 0;
       fields[k].forEach(function (x) { var t = String(x == null ? '' : x).trim(); if (!t || t === '-' || (parseDate(t) && /\d{4}|\d\/\d/.test(t))) return; t = pretty(t); answered++; counts[t] = (counts[t] || 0) + 1; });
       var e = Object.keys(counts).map(function (x) { return [x, counts[x]]; }).sort(function (a, b) { return b[1] - a[1]; });
