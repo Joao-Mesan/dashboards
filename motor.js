@@ -6,7 +6,7 @@
 (function () {
 'use strict';
 
-var VERSION = '1.9.0';
+var VERSION = '1.9.2';
 var D = window.DASH || {};
 var ROOT = document.getElementById(D.elemento || 'dash');
 if (!ROOT) return;
@@ -1513,7 +1513,8 @@ function renderSim(per) {
   else {
     var good = X.profit >= 0;
     var retorno = sim.verba > 0 ? (X.rev / sim.verba) : null;
-    html += '<div class="verdict ' + (good ? 'good' : 'bad') + '"><div class="big">' + (good ? '✅ ' + L('Se paga', 'Se paga') + ': ' + money(X.profit) + L(' de lucro', ' de ganancia') : '❌ ' + L('Ainda não se paga', 'Todavía no se paga') + ': ' + L('faltam ', 'faltan ') + money(-X.profit)) + '</div>' +
+    html += '<div class="verdict ' + (good ? 'good' : 'bad') + '"><div class="big">' + (good ? '✅ ' + L('Se paga', 'Se paga') + ': ' + money(X.profit) + L(' de lucro', ' de ganancia') : '❌ ' + L('Ainda não se paga', 'Todavía no se paga') + ': ' + L('faltam ', 'faltan ') + money(-X.profit)) +
+      (saleReal ? '' : ' <span class="tag hip">' + L('cenário', 'escenario') + '</span>') + '</div>' +
       (ok(retorno) ? L('Em resumo: investindo ', 'En resumen: invirtiendo ') + '<b>' + money(sim.verba) + '</b>' + L(', o mês fecharia com ', ', el mes cerraría con ') + '<b>' + money(X.rev) + '</b>' + L(' de faturamento (', ' de facturación (') + nf(retorno, 1) + L('x o investido). Desse faturamento, ', 'x lo invertido). De esa facturación, ') + nf(sim.margem, 0) + L('% sobra depois dos custos do produto, e é daí que sai o lucro acima.', '% queda después de los costos del producto, y de ahí sale la ganancia de arriba.') + '<br>' : '') +
       L('Para empatar: ', 'Para empatar: ') + '<b>' + vendaW(X.breakEvenSales) + '</b>' + L(' no mês. Neste cenário: ', ' en el mes. En este escenario: ') + '<b>' + vendaW(X.sales) + '</b>.' +
       (f !== 'vendas' && X.resPerSale ? '<br><small class="mut">' + L('Cada venda precisa de ~', 'Cada venta necesita ~') + plural(X.resPerSale, rn1, rn) + ' (' + money(X.costPerSale) + ').</small>' : '') + '</div>';
@@ -1523,7 +1524,7 @@ function renderSim(per) {
 
   // Da meta para a verba
   var RV = reverse(SR.R, sim, saleRate, tax);
-  html += '<div class="card"><h2>🎯 ' + L('Para vender ', 'Para vender ') + count(sim.meta) + L(' no mês', ' en el mes') + '</h2><p class="hero" style="font-size:15px">' + L('Com o desempenho atual, seria preciso investir cerca de ', 'Con el rendimiento actual, habría que invertir cerca de ') + '<b>' + money(RV.gross) + '</b>' + L(', gerando uns ', ', generando unos ') + '<b>' + plural(RV.res, rn1, rn) + '</b>.' +
+  html += '<div class="card"><h2>🎯 ' + L('Para vender ', 'Para vender ') + count(sim.meta) + L(' no mês', ' en el mes') + (saleReal ? '' : nota(L('Esta conta usa o palpite de ', 'Esta cuenta usa la estimación de ') + nf(saleRate * 100, saleRate * 100 % 1 ? 1 : 0) + L(' venda(s) a cada 100 ', ' venta(s) cada 100 ') + RNAME(f) + L('. Enquanto o comercial não registrar quem comprou, ela é um exercício, não uma previsão.', '. Mientras ventas no registre quién compró, es un ejercicio, no una previsión.'))) + '</h2><p class="hero" style="font-size:15px">' + L('Com o desempenho atual, seria preciso investir cerca de ', 'Con el rendimiento actual, habría que invertir cerca de ') + '<b>' + money(RV.gross) + '</b>' + L(', gerando uns ', ', generando unos ') + '<b>' + plural(RV.res, rn1, rn) + '</b>.' +
     (sim.verba > 0 ? ' ' + L('É ', 'Es ') + '<b>' + nf(RV.gross / sim.verba, 1) + 'x</b>' + L(' o valor que você colocou acima.', ' el valor que pusiste arriba.') : '') + '</p>' +
     (RV.profit != null ? '<p class="' + (RV.profit >= 0 ? 'up' : 'down') + '" style="margin:0">' + (RV.profit >= 0 ? L('Nesse volume, o investimento se paga, com lucro de ', 'En ese volumen, la inversión se paga, con ganancia de ') + money(RV.profit) + '.' : L('Nesse volume, o investimento ainda não se paga (faltariam ', 'En ese volumen, la inversión todavía no se paga (faltarían ') + money(-RV.profit) + ').') + '</p>' : '') + '</div>';
 
@@ -1533,10 +1534,18 @@ function renderSim(per) {
     var mtd = buildFunnel(f, { from: ms, to: end, pFrom: ms, pTo: end }), days = daysBetween(ms, end) + 1, left = daysBetween(end, me);
     var done = Math.round(f === 'vendas' ? mtd.cur.purchases : (saleReal && mtd.crmStatus ? mtd.crmCur.sale : mtd.cur[mtd.resKey] * saleRate));
     var pace = done / days, proj = done + pace * left, pct = sim.meta > 0 ? Math.min(done / sim.meta, 1) : 0, pp = sim.meta > 0 ? Math.min(Math.max(proj - done, 0) / sim.meta, 1 - pct) : 0;
-    html += '<div class="card"><h2>📅 ' + L('Como está o mês', 'Cómo va el mes') + (saleReal ? '' : ' <span class="tag hip">' + L('estimado', 'estimado') + '</span>') + '</h2>' +
+    /* Sem registro de venda, "vendas" aqui é resultado × palpite. O número não
+       pode aparecer com a mesma cara de um número medido: quem lê tem que saber
+       de onde ele saiu antes de levar para a reunião. */
+    var baseMtd = Math.round(mtd.cur[mtd.resKey] || 0);
+    var ntEst = saleReal ? '' : nota(L('Não é venda registrada: é uma conta. ', 'No es venta registrada: es una cuenta. ') +
+      count(baseMtd) + ' ' + RNAME(f) + L(' no mês × ', ' en el mes × ') + nf(saleRate * 100, saleRate * 100 % 1 ? 1 : 0) + L(' de cada 100 que você estimou acima. Ninguém registra hoje quantos ', ' de cada 100 que estimaste arriba. Nadie registra hoy cuántos ') + RNAME(f) + L(' viraram venda, então esse valor muda junto com o palpite e não deve ser usado como resultado.', ' se convirtieron en venta, así que ese valor cambia junto con la estimación y no debe usarse como resultado.'));
+    var rotulo = saleReal ? vendaW(sim.meta) : L('vendas estimadas', 'ventas estimadas') + L(' de ', ' de ') + count(sim.meta);
+    html += '<div class="card"><h2>📅 ' + L('Como está o mês', 'Cómo va el mes') + (saleReal ? '' : ' <span class="tag hip">' + L('estimativa, não medição', 'estimación, no medición') + '</span>') + ntEst + '</h2>' +
       '<div class="paceBar"><span style="width:' + (pct * 100) + '%;background:var(--ac)"></span><span style="width:' + (pp * 100) + '%;background:color-mix(in srgb,var(--ac) 35%,transparent)"></span></div>' +
-      '<p style="margin:0">' + '<b>' + nf(done, 0) + '</b>' + L(' de ', ' de ') + vendaW(sim.meta) + L(' até agora. No ritmo atual, fecha com ~', ' hasta ahora. Al ritmo actual, cierra con ~') + '<b class="' + (proj >= sim.meta ? 'up' : 'down') + '">' + nf(Math.round(proj), 0) + '</b>' +
-      (left > 0 && proj < sim.meta ? L('. Para bater a meta: ', '. Para llegar a la meta: ') + '<b>' + perDayTxt(Math.max(sim.meta - done, 0) / left, L('venda', 'venta'), L('vendas', 'ventas')) + '</b>.' : '.') + '</p></div>';
+      '<p style="margin:0">' + '<b>' + nf(done, 0) + '</b> ' + (saleReal ? L('de ', 'de ') + vendaW(sim.meta) : rotulo) + L(' até agora. No ritmo atual, fecha com ~', ' hasta ahora. Al ritmo actual, cierra con ~') + '<b class="' + (proj >= sim.meta ? 'up' : 'down') + '">' + nf(Math.round(proj), 0) + '</b>' +
+      (left > 0 && proj < sim.meta ? L('. Para bater a meta: ', '. Para llegar a la meta: ') + '<b>' + perDayTxt(Math.max(sim.meta - done, 0) / left, L('venda', 'venta'), L('vendas', 'ventas')) + '</b>.' : '.') + '</p>' +
+      (saleReal ? '' : '<p class="mut" style="font-size:12.5px;margin:10px 0 0">' + L('Base medida no mês: ', 'Base medida en el mes: ') + '<b style="color:var(--tx)">' + count(baseMtd) + ' ' + RNAME(f) + '</b>.</p>') + '</div>';
   }
   v.innerHTML = html;
   bindSim(v, per);
@@ -1680,6 +1689,25 @@ function donutHTML(entries, answered) {
     '<div class="dleg">' + legend + '</div></div>';
 }
 
+/* Escolha de quais perguntas do formulário viram gráfico.
+   window.DASH.perguntas = ['Investimento']     -> mostra só essas (lista branca)
+   window.DASH.perguntasOcultas = ['Andamento'] -> esconde essas
+   Sem nenhuma das duas, o motor decide sozinho.
+   A comparação ignora acentos e maiúsculas e aceita trecho do nome. */
+function campoPermitido(k) {
+  var n = norm(k);
+  var brancas = D.perguntas, negras = D.perguntasOcultas;
+  if (Array.isArray(brancas)) {
+    if (!brancas.length) return false;
+    return brancas.some(function (q) { var nq = norm(q); return nq && (n === nq || n.indexOf(nq) > -1); });
+  }
+  if (Array.isArray(negras) && negras.some(function (q) { var nq = norm(q); return nq && (n === nq || n.indexOf(nq) > -1); })) return false;
+  return isQuestionField(k);
+}
+function notaResp(answered, total) {
+  if (!total || answered >= total * 0.7) return '';
+  return nota(L('Só ', 'Solo ') + pctf(answered / total, 0) + L(' dos cadastros responderam esta pergunta. A distribuição mostra o perfil de quem respondeu, que pode não representar o grupo inteiro.', ' de los registros respondieron esta pregunta. La distribución muestra el perfil de quien respondió, que puede no representar al grupo entero.'));
+}
 function renderCRM(per) {
   var v = $('#v-crm'); if (!v) return;
   // campanhas presentes na coluna de UTM, para permitir olhar só uma delas
