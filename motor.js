@@ -6,7 +6,7 @@
 (function () {
 'use strict';
 
-var VERSION = '1.5.0';
+var VERSION = '1.5.1';
 var D = window.DASH || {};
 var ROOT = document.getElementById(D.elemento || 'dash');
 if (!ROOT) return;
@@ -919,13 +919,16 @@ var TABS = [
 var CUR_TAB = 'overview';
 /* Cliente de geração de leads: Cadastros vem antes de Campanhas */
 function orderedTabs() {
-  var list = TABS.filter(function (t) { return (t[0] !== 'crm' || hasCrmSource()) && (t[0] !== 'social' || hasSocial()); });
+  var list = TABS.filter(function (t) { return (t[0] !== 'crm' || hasCrmSource()) && (t[0] !== 'social' || hasSocialSource()); });
   var leads = hasCrmSource() && !(D.funis && D.funis.indexOf('vendas') > -1);
   if (!leads) return list;
   var crm = list.filter(function (t) { return t[0] === 'crm'; })[0], rest = list.filter(function (t) { return t[0] !== 'crm'; }), i = rest.findIndex(function (t) { return t[0] === 'camp'; });
   rest.splice(i, 0, crm); return rest;
 }
 function hasCrmSource() { return (D.fontes || []).some(function (f) { return (f.tipo || (f.plataforma ? 'midia' : 'crm')) === 'crm'; }); }
+/* Olha a CONFIGURAÇÃO, não os dados: a barra de abas é montada antes das
+   planilhas carregarem, então checar STATE.social aqui esconderia a aba. */
+function hasSocialSource() { return (D.fontes || []).some(function (f) { return f.tipo === 'social' || f.tipo === 'engajamento'; }); }
 
 function shell() {
   ROOT.classList.add('dz');
@@ -1607,7 +1610,13 @@ function redeNome(r) { return r === 'instagram' ? 'Instagram' : r === 'facebook'
 
 function renderSocial(per) {
   var v = $('#v-social'); if (!v) return;
-  if (!hasSocial()) { v.innerHTML = '<div class="card empty">' + L('Nenhuma fonte de redes sociais conectada.', 'Ninguna fuente de redes sociales conectada.') + '</div>'; return; }
+  if (!hasSocial()) {
+    var falhas = STATE.sources.filter(function (x) { return (x.tipo === 'social' || x.tipo === 'engajamento') && x.status && x.status.error; });
+    v.innerHTML = '<div class="card empty">' + (falhas.length
+      ? L('Não consegui ler as planilhas de redes sociais. Veja a aba Diagnóstico.', 'No pude leer las planillas de redes sociales. Mirá la pestaña Diagnóstico.')
+      : L('Sem dados de redes sociais no período selecionado.', 'Sin datos de redes sociales en el período seleccionado.')) + '</div>';
+    return;
+  }
 
   var org = socAgg(socIn(per.from, per.to, function (r) { return r.origem === 'organico'; }));
   var orgP = socAgg(socIn(per.pFrom, per.pTo, function (r) { return r.origem === 'organico'; }));
