@@ -6,7 +6,7 @@
 (function () {
 'use strict';
 
-var VERSION = '1.4.0';
+var VERSION = '1.5.0';
 var D = window.DASH || {};
 var ROOT = document.getElementById(D.elemento || 'dash');
 if (!ROOT) return;
@@ -279,11 +279,24 @@ var RULES = {
   revenue: { exact: ['valor conv', 'valor conv.', 'valor de conversao', 'valor de conversao da compra', 'valor de conversion de compras', 'conversion value', 'purchase conversion value', 'receita'], re: [/valor (de )?conv/, /conversion value/, /^receita$/], not: [/carrinho|carrito|cart|finaliza|checkout|\/ ?cust|\/ ?cost|por cust|pagina|page/] },
   cart: { exact: ['adicoes ao carrinho', 'articulos agregados al carrito', 'adds to cart', 'agregar al carrito'], re: [/carrinho|carrito|add to cart|adds to cart/], not: [/valor|custo|costo|cost|por /] },
   checkout: { exact: ['finalizacoes de compra iniciadas', 'pagos iniciados', 'checkouts initiated', 'inicio de pago'], re: [/finaliza|checkout|pagos iniciados/], not: [/valor|custo|costo|cost|por /] },
+  views: { exact: ['media insights total views', 'total views', 'page insights media view', 'visualizacoes', 'visualizaciones', 'views', 'media insights views', 'impressoes do perfil'], re: [/total views|media view|^visualizac|^views$/], not: [/custo|cost|taxa|rate|skip/] },
+  interactions: { exact: ['media insights total interactions', 'total interactions', 'page insights post engagements', 'action post engagement', 'post engagements', 'interacoes', 'interacciones', 'engajamento', 'engagement'], re: [/total interactions|post engagement|^interac|^engaj/], not: [/custo|cost|page engagement|taxa|rate/] },
+  pageEng: { exact: ['action page engagement', 'page engagement', 'page insights engagement'], re: [/page engagement/], not: [/custo|cost|post/] },
+  likes: { exact: ['media insights total likes', 'total likes', 'curtidas', 'me gusta', 'likes'], re: [/total likes|^curtidas|^likes$/], not: [/custo|cost|page like/] },
+  comments: { exact: ['media insights total comments', 'total comments', 'action post comments', 'comentarios', 'comments'], re: [/total comments|post comments|^comentario|^comments$/], not: [/custo|cost/] },
+  shares: { exact: ['media insights shares', 'shares', 'compartilhamentos', 'compartidos'], re: [/^shares$|compartilh|compartid/], not: [/custo|cost/] },
+  saves: { exact: ['media insights saved', 'saved', 'saves', 'salvamentos', 'guardados', 'action post save (onsite conversion)', 'action post save'], re: [/^saved$|^saves$|salvament|guardado|post save/], not: [/custo|cost/] },
+  followersNew: { exact: ['new followers (last 30 days only)', 'new followers', 'novos seguidores', 'seguidores ganhos', 'action page likes', 'page likes'], re: [/new followers|novos seguidores|seguidores ganhos|page likes/], not: [/custo|cost|total/] },
+  followersTotal: { exact: ['total followers (all time)', 'total followers', 'page insights follows', 'seguidores', 'followers', 'follows'], re: [/total followers|page insights follows|^seguidores$|^followers$|^follows$/], not: [/custo|cost|new|novos|ganhos/] },
   convAction: { exact: ['acao de conversao', 'tipo de conversao', 'accion de conversion', 'tipo de conversion', 'conversion action', 'conversion type'], re: [/acao de conv|tipo de conv|accion de conv|conversion (action|type)/] }
 };
 // Ordem importa: valor de conversão e compras são resolvidos antes de conversas/cadastros
 var MEDIA_FIELDS = ['date', 'campaign', 'account', 'objective', 'adset', 'ad', 'spend', 'impressions', 'clicks', 'reach', 'frequency', 'lpv', 'revenue', 'purchases', 'cart', 'checkout', 'conversations', 'leads'];
 var NUM_FIELDS = ['spend', 'impressions', 'clicks', 'reach', 'frequency', 'lpv', 'conversations', 'leads', 'purchases', 'revenue', 'cart', 'checkout'];
+/* Redes sociais: uma linha por dia. followersTotal é um retrato (não se soma),
+   o resto são contagens do dia (somam). */
+var SOC_FIELDS = ['views', 'interactions', 'pageEng', 'likes', 'comments', 'shares', 'saves', 'followersNew', 'followersTotal'];
+var SOC_SUM = ['views', 'interactions', 'pageEng', 'likes', 'comments', 'shares', 'saves', 'followersNew'];
 
 function mapColumns(header, wanted) {
   var normed = header.map(norm), map = {}, used = {};
@@ -386,7 +399,7 @@ function classifyCampaigns(rows) {
 
 /* ============================== ESTADO ============================== */
 var STATE = {
-  sources: [], rows: [], crm: [], gconv: [], has: {}, camp: {},
+  sources: [], rows: [], crm: [], gconv: [], social: [], has: {}, hasSoc: {}, socRedes: {}, camp: {},
   preset: store.get('preset', 'mtd'), from: null, to: null, incToday: false,
   plat: 'all', acct: 'all', chartMetric: 'spend', sort: { col: 'spendNow', dir: -1 },
   loadedAt: null
@@ -480,6 +493,71 @@ function processGConv(src, text) {
   return out;
 }
 
+/* ============================== REDES SOCIAIS ============================== */
+function processSocial(src, text) {
+  var st = src.status, rows = csvRows(text, detectDelim(text));
+  if (!rows.length) { st.error = L('Planilha vazia.', 'Planilla vacía.'); return []; }
+  var h = findHeaderRow(rows), header = rows[h], map = mapColumns(header, ['date'].concat(SOC_FIELDS));
+  st.headers = header; st.map = map; st.headerRow = h;
+  if (map.date == null) { st.error = L('Não encontrei a coluna de data.', 'No encontré la columna de fecha.'); return []; }
+
+  var body = rows.slice(h + 1), sample = [];
+  SOC_FIELDS.forEach(function (f) { if (map[f] != null) body.slice(0, 300).forEach(function (r) { if (r[map[f]]) sample.push(r[map[f]]); }); });
+  var loc = src.decimal === 'comma' || src.decimal === 'dot' ? src.decimal : detectLocale(sample);
+  st.locale = loc;
+  var num = makeNum(loc);
+
+  var origem = src.origem || (src.tipo === 'engajamento' ? 'pago' : 'organico');
+  var rede = norm(src.rede || (origem === 'pago' ? 'meta' : '')) || 'rede';
+  var byDate = {}, dup = 0;
+
+  body.forEach(function (r) {
+    var d = parseDate(r[map.date]); if (!d) return;
+    var o = { date: d, rede: rede, origem: origem, fonte: src.nome || src.rede || src.tipo };
+    SOC_FIELDS.forEach(function (f) { o[f] = map[f] != null ? num(r[map[f]]) : null; });
+    // uma linha por dia por fonte: se vier repetida (planilha que sobrescreve
+    // em vez de substituir), a última vence e a anterior é contada como duplicata
+    if (byDate[d]) dup++;
+    byDate[d] = o;
+  });
+
+  var out = Object.keys(byDate).sort().map(function (k) { return byDate[k]; });
+  // o campo de total de seguidores às vezes vem congelado (a extração repete o
+  // total de hoje em todas as linhas). Nesse caso ele só serve como retrato.
+  var tots = out.map(function (x) { return x.followersTotal; }).filter(function (v) { return v != null && v > 0; });
+  st.followersFrozen = tots.length > 2 && tots.every(function (v) { return v === tots[0]; });
+  st.rows = out.length; st.dup = dup; st.origem = origem; st.rede = rede;
+  SOC_FIELDS.forEach(function (f) { if (map[f] != null) STATE.hasSoc[f] = true; });
+  if (out.length) STATE.socRedes[rede] = true;
+  return out;
+}
+function socIn(from, to, filter) {
+  return STATE.social.filter(function (r) { return inRange(r.date, from, to) && (!filter || filter(r)); });
+}
+function socAgg(rows) {
+  var o = { n: rows.length };
+  SOC_SUM.forEach(function (f) { o[f] = 0; });
+  var lastTot = {};
+  rows.forEach(function (r) {
+    SOC_SUM.forEach(function (f) { if (ok(r[f])) o[f] += r[f]; });
+    if (ok(r.followersTotal) && r.followersTotal > 0) lastTot[r.rede] = r.followersTotal;
+  });
+  o.followersTotal = Object.keys(lastTot).reduce(function (a, k) { return a + lastTot[k]; }, 0);
+  return o;
+}
+/** Ganho de seguidores: usa o campo diário quando existe; senão, a diferença do retrato. */
+function followersGain(rede, from, to) {
+  var rows = socIn(from, to, function (r) { return r.rede === rede; });
+  if (!rows.length) return null;
+  var hasNew = rows.some(function (r) { return ok(r.followersNew); });
+  if (hasNew) return rows.reduce(function (a, r) { return a + (ok(r.followersNew) ? r.followersNew : 0); }, 0);
+  var tot = rows.filter(function (r) { return ok(r.followersTotal) && r.followersTotal > 0; });
+  if (tot.length < 2) return null;
+  var d = tot[tot.length - 1].followersTotal - tot[0].followersTotal;
+  return d;
+}
+function hasSocial() { return STATE.social.length > 0; }
+
 /* ============================== CARREGAMENTO ============================== */
 function initSources() {
   STATE.sources = (D.fontes || []).map(function (f, i) {
@@ -492,7 +570,7 @@ function fetchText(url) {
   return fetch(u, { cache: 'no-store' }).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); });
 }
 function loadAll() {
-  STATE.rows = []; STATE.crm = []; STATE.gconv = []; STATE.has = {};
+  STATE.rows = []; STATE.crm = []; STATE.gconv = []; STATE.social = []; STATE.has = {}; STATE.hasSoc = {}; STATE.socRedes = {};
   return Promise.all(STATE.sources.map(function (src) {
     src.status = {};
     var pasted = store.get('paste_' + src.id, '');
@@ -500,6 +578,7 @@ function loadAll() {
     return p.then(function (text) {
       if (src.tipo === 'midia') STATE.rows = STATE.rows.concat(processMedia(src, text));
       else if (src.tipo === 'conversoes_google') STATE.gconv = STATE.gconv.concat(processGConv(src, text));
+      else if (src.tipo === 'social' || src.tipo === 'engajamento') STATE.social = STATE.social.concat(processSocial(src, text));
       else STATE.crm = STATE.crm.concat(processCRM(src, text));
       src.status.ok = !src.status.error;
     }).catch(function (e) { src.status.ok = false; src.status.error = L('Não foi possível ler a planilha publicada: ', 'No se pudo leer la planilla publicada: ') + e.message; });
@@ -831,6 +910,7 @@ var TABS = [
   ['funnels', function () { return L('Funil', 'Embudo'); }],
   ['camp', function () { return L('Campanhas', 'Campañas'); }],
   ['crm', function () { return L('Cadastros', 'Registros'); }],
+  ['social', function () { return L('Redes sociais', 'Redes sociales'); }],
   ['pace', function () { return L('Ritmo de verba', 'Ritmo de inversión'); }],
   ['sim', function () { return L('Simulador', 'Simulador'); }],
   ['wa', function () { return L('Resumo WhatsApp', 'Resumen WhatsApp'); }],
@@ -839,7 +919,7 @@ var TABS = [
 var CUR_TAB = 'overview';
 /* Cliente de geração de leads: Cadastros vem antes de Campanhas */
 function orderedTabs() {
-  var list = TABS.filter(function (t) { return t[0] !== 'crm' || hasCrmSource(); });
+  var list = TABS.filter(function (t) { return (t[0] !== 'crm' || hasCrmSource()) && (t[0] !== 'social' || hasSocial()); });
   var leads = hasCrmSource() && !(D.funis && D.funis.indexOf('vendas') > -1);
   if (!leads) return list;
   var crm = list.filter(function (t) { return t[0] === 'crm'; })[0], rest = list.filter(function (t) { return t[0] !== 'crm'; }), i = rest.findIndex(function (t) { return t[0] === 'camp'; });
@@ -1513,6 +1593,103 @@ function renderPace() {
   $$('[data-b]', v).forEach(function (el) { el.onchange = function () { var st = store.get('verbas', {}); st[el.dataset.b] = el.value === '' ? '' : (parseFloat(el.value) || 0); store.set('verbas', st); renderPace(); }; });
 }
 
+/* ============================== REDES SOCIAIS (ABA) ============================== */
+var SOC_METRICS = function () { return [
+  { k: 'interactions', n: L('Interações', 'Interacciones'), help: L('Curtidas, comentários, compartilhamentos e salvamentos somados.', 'Me gusta, comentarios, compartidos y guardados sumados.') },
+  { k: 'views', n: L('Visualizações', 'Visualizaciones'), help: L('Quantas vezes o conteúdo foi visto.', 'Cuántas veces se vio el contenido.') },
+  { k: 'likes', n: L('Curtidas', 'Me gusta'), help: '' },
+  { k: 'comments', n: L('Comentários', 'Comentarios'), help: '' },
+  { k: 'shares', n: L('Compartilhamentos', 'Compartidos'), help: '' },
+  { k: 'saves', n: L('Salvamentos', 'Guardados'), help: L('Quem salvou o post para ver depois. É o sinal mais forte de interesse.', 'Quien guardó el post para ver después. Es la señal más fuerte de interés.') }
+].filter(function (m) { return STATE.hasSoc[m.k]; }); };
+
+function redeNome(r) { return r === 'instagram' ? 'Instagram' : r === 'facebook' ? 'Facebook' : r === 'meta' ? 'Meta Ads' : cap(r); }
+
+function renderSocial(per) {
+  var v = $('#v-social'); if (!v) return;
+  if (!hasSocial()) { v.innerHTML = '<div class="card empty">' + L('Nenhuma fonte de redes sociais conectada.', 'Ninguna fuente de redes sociales conectada.') + '</div>'; return; }
+
+  var org = socAgg(socIn(per.from, per.to, function (r) { return r.origem === 'organico'; }));
+  var orgP = socAgg(socIn(per.pFrom, per.pTo, function (r) { return r.origem === 'organico'; }));
+  var pag = socAgg(socIn(per.from, per.to, function (r) { return r.origem === 'pago'; }));
+  var pagP = socAgg(socIn(per.pFrom, per.pTo, function (r) { return r.origem === 'pago'; }));
+  var temPago = STATE.social.some(function (r) { return r.origem === 'pago'; });
+
+  var totInt = org.interactions + pag.interactions, totIntP = orgP.interactions + pagP.interactions;
+  var shareOrg = totInt > 0 ? org.interactions / totInt : null;
+
+  // frase de abertura
+  var frase = L('No período, o conteúdo das redes recebeu ', 'En el período, el contenido de las redes recibió ') + '<b>' + count(totInt) + '</b> ' +
+    L('interações', 'interacciones');
+  if (temPago && shareOrg != null) frase += ': <b>' + count(org.interactions) + '</b> ' + L('vieram do conteúdo publicado', 'vinieron del contenido publicado') +
+    L(' e ', ' y ') + '<b>' + count(pag.interactions) + '</b> ' + L('vieram dos anúncios', 'vinieron de los anuncios') +
+    ' (' + per100(shareOrg) + L('% orgânico', '% orgánico') + ')';
+  frase += '.';
+  var ganhos = 0, temGanho = false;
+  Object.keys(STATE.socRedes).forEach(function (rd) { var g = followersGain(rd, per.from, per.to); if (g != null) { ganhos += g; temGanho = true; } });
+  if (temGanho) frase += ' ' + L('O perfil ganhou ', 'El perfil ganó ') + '<b>' + count(ganhos) + '</b> ' + L('seguidores.', 'seguidores.');
+
+  var html = '<div class="card hl"><div class="hero-t">' + L('Redes sociais no período', 'Redes sociales en el período') + '</div><p class="hero" style="margin:0">' + frase + '</p></div>';
+
+  // composição orgânico x pago
+  if (temPago && totInt > 0) {
+    var wo = org.interactions / totInt * 100;
+    html += '<div class="card"><h2>' + L('De onde vem o engajamento', 'De dónde viene el engagement') + '</h2>' +
+      '<p class="mut">' + L('Conteúdo publicado é o que o perfil conquista sozinho. Anúncio é o que a verba comprou. Os dois contam, mas dizem coisas diferentes.', 'El contenido publicado es lo que el perfil logra solo. El anuncio es lo que la inversión compró. Los dos cuentan, pero dicen cosas distintas.') + '</p>' +
+      '<div class="paceBar" style="margin:14px 0 10px"><span style="width:' + wo + '%;background:var(--ac)"></span><span style="width:' + (100 - wo) + '%;background:color-mix(in srgb,var(--ac) 30%,transparent)"></span></div>' +
+      '<div class="grid">' +
+      kpi(L('Interações do conteúdo', 'Interacciones del contenido'), org.interactions, orgP.interactions, count, false, L('Orgânico: sem verba por trás.', 'Orgánico: sin inversión detrás.')) +
+      kpi(L('Interações de anúncio', 'Interacciones de anuncio'), pag.interactions, pagP.interactions, count, false, L('Pago: veio de campanha.', 'Pago: vino de campaña.')) +
+      kpi(L('Total', 'Total'), totInt, totIntP, count, false) + '</div></div>';
+  }
+
+  // KPIs orgânicos
+  var ms = SOC_METRICS(), grid = '';
+  ms.forEach(function (m) { if (ok(org[m.k])) grid += kpi(m.n, org[m.k], orgP[m.k], count, false, m.help); });
+  if (grid) html += '<div class="card"><h2>' + L('Conteúdo publicado', 'Contenido publicado') + '</h2>' + legendHTML(per) + '<div class="grid">' + grid + '</div></div>';
+
+  // gráfico
+  if (ms.length) html += '<div class="card"><h2>' + L('Evolução diária', 'Evolución diaria') + '</h2><div id="dzSocChart"></div></div>';
+
+  // por rede
+  var redes = Object.keys(STATE.socRedes).filter(function (r) { return r !== 'meta'; });
+  if (redes.length) {
+    html += '<div class="card"><h2>' + L('Por rede', 'Por red') + '</h2>' + tableWrap('<table><thead><tr><th>' + L('Rede', 'Red') + '</th>' +
+      ms.map(function (m) { return '<th>' + m.n + '</th>'; }).join('') + '<th>' + L('Seguidores ganhos', 'Seguidores ganados') + '</th><th>' + L('Seguidores hoje', 'Seguidores hoy') + '</th></tr></thead><tbody>' +
+      redes.map(function (rd) {
+        var a = socAgg(socIn(per.from, per.to, function (r) { return r.rede === rd; }));
+        var g = followersGain(rd, per.from, per.to);
+        var snaps = socIn(per.from, per.to, function (r) { return r.rede === rd && ok(r.followersTotal) && r.followersTotal > 0; });
+        var hoje = snaps.length ? snaps[snaps.length - 1].followersTotal : null;
+        return '<tr><td>' + redeNome(rd) + '</td>' + ms.map(function (m) { return '<td>' + (ok(a[m.k]) ? count(a[m.k]) : '—') + '</td>'; }).join('') +
+          '<td>' + (g == null ? '—' : count(g)) + '</td><td>' + (hoje == null ? '—' : count(hoje)) + '</td></tr>';
+      }).join('') + '</tbody></table>') +
+      '<p class="mut" style="font-size:12.5px;margin-top:10px">' + L('“Seguidores hoje” é o retrato mais recente do período. Quando a extração repete o mesmo total em todos os dias, esse número serve como retrato, não como curva.', '“Seguidores hoy” es la foto más reciente del período. Cuando la extracción repite el mismo total todos los días, ese número sirve como foto, no como curva.') + '</p></div>';
+  }
+
+  v.innerHTML = html;
+
+  var host = $('#dzSocChart', v);
+  if (host && ms.length) {
+    var mk = STATE.socMetric && ms.some(function (m) { return m.k === STATE.socMetric; }) ? STATE.socMetric : ms[0].k;
+    host.innerHTML = '<div class="hsw"><div class="tw-hint">' + L('arraste para ver mais →', 'deslizá para ver más →') + '</div><div class="pills scrollx hs" style="margin-bottom:10px">' +
+      ms.map(function (m) { return '<button class="pill' + (m.k === mk ? ' on' : '') + '" data-sm="' + m.k + '">' + m.n + '</button>'; }).join('') + '</div></div>' + legendHTML(per) + '<div class="chart"></div>';
+    var days = [], daysP = [];
+    for (var d = per.from; d <= per.to; d = addDays(d, 1)) days.push(d);
+    for (var d2 = per.pFrom; d2 <= per.pTo; d2 = addDays(d2, 1)) daysP.push(d2);
+    function serie(list) {
+      return list.map(function (dd) {
+        var rows = STATE.social.filter(function (r) { return r.date === dd && r.origem === 'organico'; });
+        if (!rows.length) return null;
+        return rows.reduce(function (a, r) { return a + (ok(r[mk]) ? r[mk] : 0); }, 0);
+      });
+    }
+    drawChart($('.chart', host), { labels: days.map(function (x) { return fmtD(x); }), now: serie(days), prev: serie(daysP),
+      prevLabels: daysP.map(function (x) { return fmtD(x); }), proj: null, fmt: count, fmtAxis: count });
+    $$('[data-sm]', host).forEach(function (b) { b.onclick = function () { STATE.socMetric = b.dataset.sm; renderSocial(per); enhanceTables(); }; });
+  }
+}
+
 /* ============================== RESUMO WHATSAPP ============================== */
 function renderWa(per) {
   var v = $('#v-wa'), cur = agg(filtered(per.from, per.to)), prev = agg(filtered(per.pFrom, per.pTo));
@@ -1569,7 +1746,7 @@ function syncBar(per) {
 function renderAll() {
   var per = resolvePeriod();
   syncBar(per);
-  [['overview', function () { renderOverview(per); }], ['funnels', function () { renderFunnels(per); }], ['sim', function () { renderSim(per); }], ['camp', function () { renderCamp(per); }], ['crm', function () { renderCRM(per); }], ['pace', renderPace], ['wa', function () { renderWa(per); }], ['diag', renderDiag]].forEach(function (x) {
+  [['overview', function () { renderOverview(per); }], ['funnels', function () { renderFunnels(per); }], ['sim', function () { renderSim(per); }], ['camp', function () { renderCamp(per); }], ['crm', function () { renderCRM(per); }], ['pace', renderPace], ['social', function () { renderSocial(per); }], ['wa', function () { renderWa(per); }], ['diag', renderDiag]].forEach(function (x) {
     try { x[1](); } catch (e) { var el = $('#v-' + x[0]); if (el) el.innerHTML = '<div class="card down">' + L('Erro ao montar esta aba: ', 'Error al armar esta pestaña: ') + esc(e.message) + '</div>'; if (window.console) console.error(e); }
   });
   setTimeout(function () { enhanceTables(); reportHeight(); }, 50);
