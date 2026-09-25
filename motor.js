@@ -134,7 +134,8 @@ container-type:inline-size;max-width:1120px;margin:0 auto;background:var(--bg);c
 .dz td.prev,.dz th.prev{color:var(--mut)}\
 .dz .vf{display:flex;flex-direction:column;align-items:center;gap:0;margin:8px 0}\
 .dz .vf .bar{width:100%;display:flex;justify-content:center}\
-.dz .vf .blk{border-radius:10px;padding:10px 14px;background:color-mix(in srgb,var(--ac) 16%,var(--card2));border:1px solid color-mix(in srgb,var(--ac) 45%,transparent);display:flex;justify-content:space-between;align-items:baseline;gap:10px;min-width:210px;max-width:100%}\
+.dz .vf .blk{box-sizing:border-box}\
+.dz .vf .blk{border-radius:10px;padding:10px 14px;transition:width .25s ease;background:color-mix(in srgb,var(--ac) 16%,var(--card2));border:1px solid color-mix(in srgb,var(--ac) 45%,transparent);display:flex;justify-content:space-between;align-items:baseline;gap:10px;min-width:210px;max-width:100%}\
 .dz .vf .blk .l{font-size:13px}.dz .vf .blk .x{font-size:20px;font-weight:600;white-space:nowrap}\
 .dz .vf .blk .d{font-size:11.5px;white-space:nowrap}\
 .dz .vf .arrow{font-size:12.5px;color:var(--mut);padding:6px 0;text-align:center}.dz .vf .arrow b{color:var(--tx)}\
@@ -443,9 +444,17 @@ function processGConv(src, text) {
   st.headers = header; st.map = map; st.headerRow = h;
   if (map.date == null || map.convAction == null) { st.error = L('Faltam colunas de data ou ação de conversão.', 'Faltan columnas de fecha o acción de conversión.'); return []; }
   var body = rows.slice(h + 1), num = makeNum(detectLocale(body.slice(0, 300).map(function (r) { return r[map.purchases]; })));
-  var out = [];
-  body.forEach(function (r) { var d = parseDate(r[map.date]); if (!d) return; out.push({ date: d, action: String(r[map.convAction] || '—').trim(), conv: map.purchases != null ? num(r[map.purchases]) : 0, value: map.revenue != null ? num(r[map.revenue]) : 0 }); });
-  st.rows = out.length;
+  var out = [], seen = {}, dup = 0;
+  body.forEach(function (r) {
+    var d = parseDate(r[map.date]); if (!d) return;
+    var o = { date: d, campaign: map.campaign != null ? String(r[map.campaign] || '').trim() : '', action: String(r[map.convAction] || '—').trim(), conv: map.purchases != null ? num(r[map.purchases]) : 0, value: map.revenue != null ? num(r[map.revenue]) : 0 };
+    // mesma dedupe da mídia: planilha que soma em vez de substituir dobra os números
+    var dk = [o.date, o.campaign, o.action].join('|'), sig = Math.round(o.conv * 100) + ',' + Math.round(o.value * 100);
+    if (seen[dk] === sig) { dup++; return; }
+    seen[dk] = sig;
+    out.push(o);
+  });
+  st.rows = out.length; st.dup = dup;
   return out;
 }
 
@@ -703,9 +712,38 @@ function insights(per) {
     var k = r.key, c = byC[k] || (byC[k] = { name: r.campaign, f: r.funnel, spend: 0, res: 0 });
     c.spend += r.spend; c.res += r[RESULT(r.funnel)] || 0;
   });
+  // 8) o que foi bem: resultado, custo e melhor campanha
+  fs.forEach(function (f) {
+    if (f === 'outros' || f === 'trafego') return;
+    var F = buildFunnel(f, per), rk = F.resKey; if (!rk) return;
+    var c = F.cur[rk], pv = F.prev[rk], nm = FNAME(f);
+    var dr = deltaTxt(c, pv);
+    if (dr && dr.v >= 0.1 && c >= 3) out.push({ t: 'pos', f: f, prio: 4,
+      title: nm + ': ' + cap(RNAME(f)) + L(' cresceram ', ' crecieron ') + nf(dr.v * 100, 0) + '%',
+      body: count(pv) + ' → ' + count(c) + L(' no mesmo número de dias.', ' en la misma cantidad de días.') });
+    if (f === 'vendas' && F.cur.revenue > 0 && F.prev.revenue > 0) {
+      var dv = deltaTxt(F.cur.revenue, F.prev.revenue);
+      if (dv && dv.v >= 0.05) out.push({ t: 'pos', f: f, prio: 5, title: L('Faturamento cresceu ', 'La facturación creció ') + nf(dv.v * 100, 0) + '%', body: money(F.prev.revenue) + ' → ' + money(F.cur.revenue) + (ok(F.cur.roas) ? L('. Cada ', '. Cada ') + money(1) + L(' investido devolveu ', ' invertido devolvió ') + money(F.cur.roas) + '.' : '.') });
+    }
+    // melhor campanha do funil pelo custo por resultado
+    var m = {};
+    filtered(per.from, per.to, function (r) { return r.funnel === f; }).forEach(function (r) { var x = m[r.key] || (m[r.key] = { name: r.campaign, spend: 0, res: 0 }); x.spend += r.spend; x.res += r[rk] || 0; });
+    var tot = Object.keys(m).reduce(function (a, k) { return a + m[k].spend; }, 0);
+    var cand = Object.keys(m).map(function (k) { return m[k]; }).filter(function (x) { return x.res >= 3 && x.spend >= tot * 0.05; }).sort(function (a, b) { return a.spend / a.res - b.spend / b.res; })[0];
+    if (cand && tot > 0) out.push({ t: 'pos', f: f, prio: 3,
+      title: L('Destaque: ', 'Destacado: ') + esc(cand.name),
+      body: L('Trouxe ', 'Trajo ') + plural(cand.res, RNAME(f, false), RNAME(f)) + L(' a ', ' a ') + money(cand.spend / cand.res) + L(' cada, o melhor custo do período.', ' cada uno, el mejor costo del período.') });
+  });
+
   var zero = Object.keys(byC).map(function (k) { return byC[k]; }).filter(function (c) { return c.spend > 0 && c.res === 0; }).sort(function (a, b) { return b.spend - a.spend; });
-  if (zero.length) out.push({ t: 'att', prio: 2, title: L('Campanhas com investimento e sem resultado', 'Campañas con inversión y sin resultado'), body: zero.slice(0, 3).map(function (c) { return esc(c.name) + ' (' + money(c.spend) + ')'; }).join(' · '), act: L('Confira se o evento de conversão está configurado e se a campanha ainda está em aprendizado.', 'Revisá si el evento de conversión está configurado y si la campaña sigue en aprendizaje.') });
-  return out.sort(function (a, b) { var o = { att: 0, dado: 1, pos: 2 }; return (o[a.t] - o[b.t]) || (b.prio - a.prio); });
+  if (zero.length) out.push({ t: 'att', prio: 2, title: L('Verba que ainda não virou resultado', 'Inversión que todavía no dio resultado'), body: zero.slice(0, 3).map(function (c) { return esc(c.name) + ' (' + money(c.spend) + ')'; }).join(' · '), act: L('Confira se o evento de conversão está configurado e se a campanha ainda está em aprendizado.', 'Revisá si el evento de conversión está configurado y si la campaña sigue en aprendizaje.') });
+  out.sort(function (a, b) { var o = { pos: 0, dado: 1, att: 2 }; return (o[a.t] - o[b.t]) || (b.prio - a.prio); });
+  // o cliente lê isto: primeiro o que foi bem, e no máximo dois pontos de atenção,
+  // sempre os de maior impacto. O resto continua visível na aba Diagnóstico.
+  var pos = out.filter(function (i) { return i.t === 'pos'; }).slice(0, 4);
+  var dado = out.filter(function (i) { return i.t === 'dado'; }).slice(0, 1);
+  var att = out.filter(function (i) { return i.t === 'att'; }).slice(0, 2);
+  return pos.concat(dado, att);
 }
 
 /* ============================== CENÁRIOS (dados reais) ============================== */
@@ -1057,8 +1095,26 @@ function missingLine(key) {
     sale: L('Ninguém anota quem comprou.', 'Nadie anota quién compró.')
   })[key] || '';
 }
+/* Largura de cada degrau: mistura a proporção real (raiz quadrada, para o
+   último degrau não sumir) com uma forma de funil garantida, e força cada
+   degrau a ser mais estreito que o anterior. Sem isso, etapas de ordens de
+   grandeza diferentes acabavam todas na largura mínima, viravam retângulos
+   iguais e o desenho não parecia um funil. */
+function funnelWidth(F, i) {
+  if (F._w) return F._w[i];
+  var n = F.stages.length, base = F.stages[0] && F.stages[0].cur || 0, w = [];
+  for (var k = 0; k < n; k++) {
+    var s = F.stages[k];
+    var shape = 100 - (n > 1 ? (k / (n - 1)) * 62 : 0);
+    var real = (base > 0 && !s.missing && ok(s.cur)) ? Math.sqrt(Math.max(s.cur, 0) / base) * 100 : shape;
+    var val = Math.round(real * 0.45 + shape * 0.55);
+    if (k > 0) val = Math.min(val, w[k - 1] - 6);
+    w.push(Math.max(34, Math.min(100, val)));
+  }
+  F._w = w;
+  return w[i];
+}
 function visualFunnel(F) {
-  var shown = F.stages.filter(function (s) { return !s.missing; }), top = Math.log10((shown[0] && shown[0].cur || 1) + 1) || 1;
   var html = '<div class="vf">';
   F.stages.forEach(function (s, i) {
     if (i > 0) {
@@ -1067,8 +1123,8 @@ function visualFunnel(F) {
       else if (s.rate != null) html += '<div class="arrow">↓ <b>' + per100(s.rate) + L(' de cada 100', ' de cada 100') + '</b> ' + L('seguiram', 'siguieron') + (s.pRate != null ? ' · ' + L('antes ', 'antes ') + per100(s.pRate) : '') + '</div>';
       else html += '<div class="arrow">↓</div>';
     }
-    if (s.missing) { html += '<div class="bar"><div class="blk fog" style="width:56%"><span class="l">' + s.label + '<br><small class="mut">' + missingLine(s.missing) + '</small></span><span class="x">?</span></div></div>'; return; }
-    var w = Math.max(56, Math.round(Math.log10((s.cur || 0) + 1) / top * 100)), d = deltaTxt(s.cur, s.prev);
+    if (s.missing) { html += '<div class="bar"><div class="blk fog" style="width:' + funnelWidth(F, i) + '%"><span class="l">' + s.label + '<br><small class="mut">' + missingLine(s.missing) + '</small></span><span class="x">?</span></div></div>'; return; }
+    var w = funnelWidth(F, i), d = deltaTxt(s.cur, s.prev);
     html += '<div class="bar"><div class="blk" style="width:' + w + '%"><span class="l">' + s.label + (d ? ' <span class="d ' + (d.v >= 0 ? 'up' : 'down') + '">' + d.txt + '</span>' : '') + '</span><span class="x">' + count(s.cur) + '</span></div></div>';
   });
   return html + '</div>';
@@ -1182,10 +1238,12 @@ function renderSim(per) {
 
   // O caminho do dinheiro
   var cenNames = { P: L('Cauteloso', 'Cauteloso'), R: L('Provável', 'Probable'), O: L('Otimista', 'Optimista') };
+  var cenHelp = { P: L('usa as semanas de pior desempenho do período', 'usa las semanas de peor rendimiento del período'), R: L('usa a média do período', 'usa el promedio del período'), O: L('usa as semanas de melhor desempenho do período', 'usa las semanas de mejor rendimiento del período') };
   function fstep(ic, label, help, val, tag) { return '<div class="fs"><div class="ic">' + ic + '</div><div><div class="fl">' + label + (tag || '') + '</div><div class="fh">' + help + '</div></div><div class="fv">' + val + '</div></div><div class="con"></div>'; }
   var chip = function (real) { return ' <span class="tag ' + (real ? 'real' : 'hip') + '">' + (real ? L('dado real', 'dato real') : L('palpite', 'estimación')) + '</span>'; };
   html += '<div class="card"><h2>' + L('O caminho do seu dinheiro', 'El camino de tu dinero') + '</h2>' +
-    '<div class="seg" data-seg="cen">' + ['P', 'R', 'O'].map(function (k) { return '<button data-v="' + k + '" class="' + (k === sim.cen ? 'on' : '') + '">' + cenNames[k] + '</button>'; }).join('') + '</div><div class="flow">' +
+    '<p class="mut">' + L('Cada linha é uma etapa do caminho entre o que você paga às plataformas e o que entra no caixa. As porcentagens vêm do desempenho real das suas campanhas no período.', 'Cada línea es una etapa del camino entre lo que pagás a las plataformas y lo que entra en caja. Los porcentajes vienen del rendimiento real de tus campañas en el período.') + '</p>' +
+    '<div class="seg" data-seg="cen">' + ['P', 'R', 'O'].map(function (k) { return '<button data-v="' + k + '" class="' + (k === sim.cen ? 'on' : '') + '">' + cenNames[k] + '</button>'; }).join('') + '</div><p class="mut" style="font-size:12.5px;margin:8px 0 0">' + cenNames[sim.cen] + ': ' + cenHelp[sim.cen] + '.</p><div class="flow">' +
     fstep('💰', L('Você investe', 'Invertís'), X.taxes > 1 ? L('sendo ', 'de los cuales ') + money(X.taxes) + L(' de imposto cobrado pela plataforma', ' son impuesto de la plataforma') : L('total no mês', 'total del mes'), money(sim.verba)) +
     fstep('👀', L('Os anúncios aparecem', 'Los anuncios aparecen'), money(scen.cpm) + L(' a cada mil', ' cada mil'), nf(X.impr, 0) + L(' vezes', ' veces')) +
     fstep('👆', L('Pessoas clicam', 'Personas hacen clic'), per100(scen.ctr) + L(' de cada 100 que veem', ' de cada 100 que ven'), nf(X.clicks, 0)) +
@@ -1202,7 +1260,9 @@ function renderSim(per) {
   } else if (X.profit == null) html += '<div class="verdict neu">' + L('Informe quanto vale uma venda para ver se o investimento se paga.', 'Informá cuánto vale una venta para ver si la inversión se paga.') + '</div>';
   else {
     var good = X.profit >= 0;
-    html += '<div class="verdict ' + (good ? 'good' : 'bad') + '"><div class="big">' + (good ? '✅ ' + L('Se paga', 'Se paga') + ': ' + money(X.profit) + L(' de lucro', ' de ganancia') : '❌ ' + L('Não se paga', 'No se paga') + ': ' + L('faltam ', 'faltan ') + money(-X.profit)) + '</div>' +
+    var retorno = sim.verba > 0 ? (X.rev / sim.verba) : null;
+    html += '<div class="verdict ' + (good ? 'good' : 'bad') + '"><div class="big">' + (good ? '✅ ' + L('Se paga', 'Se paga') + ': ' + money(X.profit) + L(' de lucro', ' de ganancia') : '❌ ' + L('Ainda não se paga', 'Todavía no se paga') + ': ' + L('faltam ', 'faltan ') + money(-X.profit)) + '</div>' +
+      (ok(retorno) ? L('Em resumo: investindo ', 'En resumen: invirtiendo ') + '<b>' + money(sim.verba) + '</b>' + L(', o mês fecharia com ', ', el mes cerraría con ') + '<b>' + money(X.rev) + '</b>' + L(' de faturamento (', ' de facturación (') + nf(retorno, 1) + L('x o investido). Desse faturamento, ', 'x lo invertido). De esa facturación, ') + nf(sim.margem, 0) + L('% sobra depois dos custos do produto, e é daí que sai o lucro acima.', '% queda después de los costos del producto, y de ahí sale la ganancia de arriba.') + '<br>' : '') +
       L('Para empatar: ', 'Para empatar: ') + '<b>' + vendaW(X.breakEvenSales) + '</b>' + L(' no mês. Neste cenário: ', ' en el mes. En este escenario: ') + '<b>' + vendaW(X.sales) + '</b>.' +
       (f !== 'vendas' && X.resPerSale ? '<br><small class="mut">' + L('Cada venda precisa de ~', 'Cada venta necesita ~') + plural(X.resPerSale, rn1, rn) + ' (' + money(X.costPerSale) + ').</small>' : '') + '</div>';
   }
@@ -1287,8 +1347,18 @@ function renderCamp(per) {
     var gm = {};
     STATE.gconv.filter(function (g) { return inRange(g.date, per.from, per.to); }).forEach(function (g) { var a = gm[g.action] || (gm[g.action] = { conv: 0, value: 0 }); a.conv += g.conv; a.value += g.value; });
     var gl = Object.keys(gm).map(function (k) { return [k, gm[k]]; }).sort(function (a, b) { return b[1].conv - a[1].conv; });
-    html += '<div class="card"><h2>' + L('Google Ads · conversões por tipo', 'Google Ads · conversiones por tipo') + '</h2>' + tableWrap('<table><thead><tr><th>' + L('Ação de conversão', 'Acción de conversión') + '</th><th>' + L('Conversões', 'Conversiones') + '</th><th>' + L('Valor', 'Valor') + '</th></tr></thead><tbody>' +
-      (gl.length ? gl.map(function (x) { return '<tr><td>' + esc(x[0]) + '</td><td>' + nf(x[1].conv, 1) + '</td><td>' + money(x[1].value) + '</td></tr>'; }).join('') : '<tr><td colspan="3" class="empty">—</td></tr>') + '</tbody></table>') + '</div>';
+    var gTot = gl.reduce(function (a, x) { return { conv: a.conv + x[1].conv, value: a.value + x[1].value }; }, { conv: 0, value: 0 });
+    var gRev = 0, gConv = 0;
+    filtered(per.from, per.to, function (r) { return r.platform === 'google'; }).forEach(function (r) { gRev += r.revenue; gConv += r.purchases; });
+    var diff = gRev > 0 ? Math.abs(gTot.value - gRev) / gRev : 0;
+    html += '<div class="card"><h2>' + L('Google Ads · de onde vem o resultado', 'Google Ads · de dónde viene el resultado') + '</h2>' +
+      '<p class="mut" style="font-size:12.5px">' + L('Só do Google Ads, e só das ações de conversão configuradas na conta. Não inclui o Meta.', 'Solo de Google Ads, y solo de las acciones de conversión configuradas en la cuenta. No incluye Meta.') + '</p>' +
+      tableWrap('<table><thead><tr><th>' + L('Ação de conversão', 'Acción de conversión') + '</th><th>' + L('Conversões', 'Conversiones') + '</th><th>' + L('Valor', 'Valor') + '</th></tr></thead><tbody>' +
+      (gl.length ? gl.map(function (x) { return '<tr><td>' + esc(x[0]) + '</td><td>' + nf(x[1].conv, 1) + '</td><td>' + money(x[1].value) + '</td></tr>'; }).join('') : '<tr><td colspan="3" class="empty">—</td></tr>') +
+      '</tbody><tfoot><tr><td><b>' + L('Soma desta tabela', 'Suma de esta tabla') + '</b></td><td><b>' + nf(gTot.conv, 1) + '</b></td><td><b>' + money(gTot.value) + '</b></td></tr>' +
+      '<tr class="prev"><td>' + L('Google Ads no relatório de campanhas', 'Google Ads en el reporte de campañas') + '</td><td>' + nf(gConv, 1) + '</td><td>' + money(gRev) + '</td></tr></tfoot></table>') +
+      (diff > 0.02 ? '<p class="mut" style="font-size:12.5px;margin-top:10px">' + L('As duas linhas deveriam bater. Diferença de ', 'Las dos líneas deberían coincidir. Diferencia de ') + pctf(diff, 1) + L('. Causas possíveis: a planilha de conversões por tipo cobre um período diferente da de campanhas, ou uma das duas tem linhas repetidas na origem. Confira na aba Diagnóstico.', '. Causas posibles: la planilla de conversiones por tipo cubre un período distinto al de campañas, o una de las dos tiene filas repetidas en el origen. Revisá en la pestaña Diagnóstico.') + '</p>' : '') +
+      '</div>';
   }
   var ins = insights(per);
   html += '<div class="card"><h2>' + L('O que os números dizem', 'Lo que dicen los números') + '</h2><p class="mut" style="font-size:12px">' + L('Leituras automáticas: apontam onde olhar, não são certezas.', 'Lecturas automáticas: señalan dónde mirar, no son certezas.') + '</p>' +
@@ -1343,22 +1413,54 @@ function renderPace() {
   if (end < ms) end = ms;
   var accts = {}; STATE.rows.forEach(function (r) { if (STATE.plat === 'all' || r.platform === STATE.plat) accts[r.account] = r.platform; });
   var budgets = Object.assign({}, D.verbas || {}, store.get('verbas', {}));
-  var days = daysBetween(ms, end) + 1, left = daysBetween(end, me), total = { b: 0, s: 0, p: 0 };
-  var html = '<div class="card"><h2>' + L('Ritmo de verba no mês', 'Ritmo de inversión del mes') + '</h2><p class="mut">' + L('Informe a verba mensal de cada conta. O valor fica salvo neste navegador. Dias considerados: ', 'Informá la inversión mensual de cada cuenta. Queda guardada en este navegador. Días considerados: ') + days + L(' de ', ' de ') + (days + left) + '.</p></div>';
-  Object.keys(accts).sort().forEach(function (a) {
-    var s = agg(STATE.rows.filter(function (r) { return r.account === a && inRange(r.date, ms, end); })).spend;
-    var b = +budgets[a] || 0, avg = s / days, proj = s + avg * left, need = left > 0 ? Math.max(b - s, 0) / left : 0;
-    total.b += b; total.s += s; total.p += proj;
-    var sp = b ? Math.min(s / b * 100, 100) : 0, pp = b ? Math.min(Math.max(proj - s, 0) / b * 100, 100 - sp) : 0, over = b && proj > b * 1.02, under = b && proj < b * 0.9;
-    html += '<div class="card"><div class="bar"><h3>' + (accts[a] === 'google' ? 'Google · ' : 'Meta · ') + esc(a) + '</h3><label class="mut" style="font-size:12.5px">' + L('Verba do mês', 'Inversión del mes') + ' <input type="number" data-b="' + esc(a) + '" value="' + (b || '') + '" style="width:120px"></label></div>' +
-      '<div class="paceBar"><span style="width:' + sp + '%;background:var(--ac)"></span><span style="width:' + pp + '%;background:color-mix(in srgb,var(--ac) 35%,transparent)"></span></div><div class="grid">' +
-      kpiSimple(L('Gasto no mês', 'Gastado en el mes'), money(s)) + kpiSimple(L('Média por dia', 'Promedio por día'), money(avg)) +
-      kpiSimple(L('Projeção de fechamento', 'Proyección de cierre'), money(proj), over ? 'down' : under ? 'warn' : 'up', !b ? L('informe a verba', 'informá la inversión') : over ? L('acima da verba', 'por encima de la inversión') : under ? L('abaixo da verba', 'por debajo de la inversión') : L('dentro do planejado', 'dentro de lo planificado')) +
-      kpiSimple(L('Necessário por dia até o fim', 'Necesario por día hasta el fin'), b ? money(need) : '—') + '</div></div>';
-  });
-  if (!Object.keys(accts).length) html += '<div class="card empty">' + L('Sem contas no filtro.', 'Sin cuentas en el filtro.') + '</div>';
+  var days = daysBetween(ms, end) + 1, left = daysBetween(end, me);
+
+  // verba total: o que o usuário digitar manda; senão, soma das verbas por conta
+  var somaContas = 0; Object.keys(accts).forEach(function (a) { somaContas += +budgets[a] || 0; });
+  var total = budgets.__total != null && budgets.__total !== '' ? +budgets.__total : somaContas;
+
+  var gastoTotal = agg(STATE.rows.filter(function (r) { return (STATE.plat === 'all' || r.platform === STATE.plat) && inRange(r.date, ms, end); })).spend;
+  var avg = gastoTotal / days, proj = gastoTotal + avg * left, need = left > 0 ? Math.max(total - gastoTotal, 0) / left : 0;
+  var sp = total ? Math.min(gastoTotal / total * 100, 100) : 0, pp = total ? Math.min(Math.max(proj - gastoTotal, 0) / total * 100, 100 - sp) : 0;
+  var over = total && proj > total * 1.02, under = total && proj < total * 0.9;
+
+  var frase;
+  if (!total) frase = L('Informe a verba total do mês para ver a projeção.', 'Informá la inversión total del mes para ver la proyección.');
+  else if (over) frase = L('No ritmo atual, o mês fecha em ', 'Al ritmo actual, el mes cierra en ') + '<b>' + money(proj) + '</b>' + L(', acima da verba de ', ', por encima de la inversión de ') + money(total) + L('. Para fechar no valor combinado, o ritmo precisa cair para ', '. Para cerrar en el valor acordado, el ritmo tiene que bajar a ') + '<b>' + money(need) + L(' por dia', ' por día') + '</b>.';
+  else if (under) frase = L('No ritmo atual, o mês fecha em ', 'Al ritmo actual, el mes cierra en ') + '<b>' + money(proj) + '</b>' + L(', abaixo da verba de ', ', por debajo de la inversión de ') + money(total) + L('. Dá para investir até ', '. Se puede invertir hasta ') + '<b>' + money(need) + L(' por dia', ' por día') + '</b>' + L(' sem passar do combinado.', ' sin pasar lo acordado.');
+  else frase = L('No ritmo atual, o mês fecha em ', 'Al ritmo actual, el mes cierra en ') + '<b>' + money(proj) + '</b>' + L(', dentro da verba de ', ', dentro de la inversión de ') + money(total) + '.';
+
+  var html = '<div class="card hl"><div class="bar"><h2>' + L('Ritmo de verba no mês', 'Ritmo de inversión del mes') + '</h2>' +
+    '<label class="mut" style="font-size:12.5px">' + L('Verba total do mês', 'Inversión total del mes') + ' <input type="number" data-b="__total" value="' + (budgets.__total != null && budgets.__total !== '' ? budgets.__total : (somaContas || '')) + '" style="width:130px"></label></div>' +
+    '<p class="mut">' + L('Dia ', 'Día ') + days + L(' de ', ' de ') + (days + left) + L('. O valor fica salvo neste navegador.', '. El valor queda guardado en este navegador.') + '</p>' +
+    '<div class="paceBar"><span style="width:' + sp + '%;background:var(--ac)"></span><span style="width:' + pp + '%;background:color-mix(in srgb,var(--ac) 35%,transparent)"></span></div>' +
+    '<p class="hero" style="font-size:15px;margin:10px 0 0">' + frase + '</p>' +
+    '<div class="grid" style="margin-top:12px">' +
+    kpiSimple(L('Investido até agora', 'Invertido hasta ahora'), money(gastoTotal), '', total ? nf(sp, 0) + L('% da verba', '% de la inversión') : '') +
+    kpiSimple(L('Média por dia', 'Promedio por día'), money(avg)) +
+    kpiSimple(L('Projeção de fechamento', 'Proyección de cierre'), money(proj), over ? 'down' : under ? 'warn' : 'up', !total ? '' : over ? L('acima da verba', 'por encima') : under ? L('abaixo da verba', 'por debajo') : L('dentro do planejado', 'dentro de lo planificado')) +
+    kpiSimple(L('Ritmo necessário por dia', 'Ritmo necesario por día'), total ? money(need) : '—', '', left > 0 ? plural(left, L('dia restante', 'día restante'), L('dias restantes', 'días restantes')) : L('mês encerrado', 'mes cerrado')) +
+    '</div></div>';
+
+  // detalhe por conta, opcional
+  var lista = Object.keys(accts).sort();
+  if (lista.length) {
+    html += '<div class="card"><details><summary>' + L('Ver a divisão por conta de anúncio', 'Ver la división por cuenta de anuncios') + '</summary><p class="mut" style="font-size:12.5px;margin-top:8px">' + L('A verba por conta é opcional: serve só para acompanhar a divisão interna. A projeção acima usa a verba total.', 'La inversión por cuenta es opcional: sirve solo para seguir la división interna. La proyección de arriba usa la inversión total.') + '</p>';
+    lista.forEach(function (a) {
+      var sA = agg(STATE.rows.filter(function (r) { return r.account === a && inRange(r.date, ms, end); })).spend;
+      var bA = +budgets[a] || 0, avgA = sA / days, projA = sA + avgA * left;
+      var share = gastoTotal > 0 ? sA / gastoTotal : 0;
+      html += '<div style="border-top:1px solid var(--bd);padding-top:12px;margin-top:12px"><div class="bar"><h3>' + (accts[a] === 'google' ? 'Google · ' : 'Meta · ') + esc(a) + '</h3>' +
+        '<label class="mut" style="font-size:12.5px">' + L('Verba desta conta', 'Inversión de esta cuenta') + ' <input type="number" data-b="' + esc(a) + '" value="' + (bA || '') + '" style="width:110px"></label></div>' +
+        '<div class="grid">' + kpiSimple(L('Gasto no mês', 'Gastado en el mes'), money(sA), '', per100(share) + L('% do total', '% del total')) +
+        kpiSimple(L('Média por dia', 'Promedio por día'), money(avgA)) +
+        kpiSimple(L('Projeção', 'Proyección'), money(projA), '', bA ? L('verba: ', 'inversión: ') + money(bA) : L('sem verba definida', 'sin inversión definida')) + '</div></div>';
+    });
+    html += '</details></div>';
+  } else html += '<div class="card empty">' + L('Sem contas no filtro.', 'Sin cuentas en el filtro.') + '</div>';
+
   v.innerHTML = html;
-  $$('[data-b]', v).forEach(function (el) { el.onchange = function () { var s = store.get('verbas', {}); s[el.dataset.b] = parseFloat(el.value) || 0; store.set('verbas', s); renderPace(); }; });
+  $$('[data-b]', v).forEach(function (el) { el.onchange = function () { var st = store.get('verbas', {}); st[el.dataset.b] = el.value === '' ? '' : (parseFloat(el.value) || 0); store.set('verbas', st); renderPace(); }; });
 }
 
 /* ============================== RESUMO WHATSAPP ============================== */
