@@ -6,7 +6,7 @@
 (function () {
 'use strict';
 
-var VERSION = '1.8.0';
+var VERSION = '1.8.1';
 var D = window.DASH || {};
 var ROOT = document.getElementById(D.elemento || 'dash');
 if (!ROOT) return;
@@ -140,6 +140,8 @@ container-type:inline-size;max-width:1120px;margin:0 auto;background:var(--bg);c
 .dz th.sorted{color:var(--ac)}\
 .dz .sar{margin-left:5px;font-size:10px}\
 .dz .flow .fn{font-size:11.5px;margin-top:3px}\
+.dz .fsel{width:100%;max-width:560px;background:var(--card2);border:1px solid var(--bd);border-radius:10px;padding:11px 12px;font-size:14px;color:var(--tx);min-height:44px}\
+.dz .fsel:focus{outline:2px solid var(--ac);outline-offset:1px}\
 .dz .nt{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;border:1px solid var(--bd);color:var(--mut);font-size:10px;line-height:1;margin-left:6px;cursor:help;position:relative;vertical-align:middle;user-select:none}\
 .dz .nt:hover,.dz .nt.on{border-color:var(--ac);color:var(--ac)}\
 .dz .nt .ntx{display:none;position:absolute;bottom:22px;left:50%;transform:translateX(-50%);width:250px;background:#08080a;border:1px solid var(--bd);border-radius:10px;padding:10px 12px;font-size:12.5px;line-height:1.5;color:var(--mut);text-align:left;z-index:20;box-shadow:0 10px 30px rgba(0,0,0,.6);cursor:auto}\
@@ -527,7 +529,7 @@ function processCRM(src, text) {
     var sale = forcaVenda || (statusIdx > -1 && SALE_RE.test(s));
     var qual = sale || forcaQual || (statusIdx > -1 && QUAL_RE.test(s));
     var raw = {}; header.forEach(function (hh, j) { raw[hh] = r[j] == null ? '' : r[j]; });
-    out.push({ date: d, funnel: src.funil || 'cadastro', sale: sale, qual: qual, value: (sale && valueIdx > -1) ? num(r[valueIdx]) : 0, status: statusIdx > -1 ? String(r[statusIdx]).trim() : '', utm: utmIdx > -1 ? String(r[utmIdx] || '').trim() : '', etapa: src.etapa || '', raw: raw, src: src.nome || '' });
+    out.push({ date: d, funnel: src.funil || 'cadastro', sale: sale, qual: qual, value: (sale && valueIdx > -1) ? num(r[valueIdx]) : 0, status: statusIdx > -1 ? String(r[statusIdx]).trim() : '', utm: (utmIdx > -1 && !valorVazio(r[utmIdx])) ? String(r[utmIdx]).trim() : '', etapa: src.etapa || '', raw: raw, src: src.nome || '' });
   });
   st.rows = out.length; st.hasStatus = statusIdx > -1 || forcaQual || forcaVenda;
   st.map.campanha = utmIdx > -1 ? utmIdx : undefined;
@@ -1339,10 +1341,9 @@ function renderFunnels(per) {
   if (opcoes.length > 1) {
     html += '<div class="card"><h3>' + L('Campanha', 'Campaña') + '</h3>' +
       '<p class="mut" style="font-size:12.5px">' + L('Só aparecem campanhas que investiram no período selecionado. Escolher uma recalcula o funil inteiro só com ela.', 'Solo aparecen campañas que invirtieron en el período seleccionado. Elegir una recalcula el embudo entero solo con ella.') + '</p>' +
-      '<div class="hsw"><div class="pills scrollx hs" style="margin-top:10px">' +
-      '<button class="pill' + (camp ? '' : ' on') + '" data-fc="all">' + L('Todas', 'Todas') + '</button>' +
-      opcoes.map(function (c) { return '<button class="pill' + (camp === c.key ? ' on' : '') + '" data-fc="' + esc(c.key) + '">' + nameHTML(c.name) + ' <span class="mut">' + moneyShort(c.spend) + '</span></button>'; }).join('') +
-      '</div></div></div>';
+      '<select class="fsel" data-fc style="margin-top:10px"><option value="all"' + (camp ? '' : ' selected') + '>' + L('Todas as campanhas', 'Todas las campañas') + ' (' + opcoes.length + ')</option>' +
+      opcoes.map(function (c) { return '<option value="' + esc(c.key) + '"' + (camp === c.key ? ' selected' : '') + '>' + esc(c.name) + ' · ' + moneyShort(c.spend) + '</option>'; }).join('') +
+      '</select></div>';
   }
 
   if (!fs.length) html += '<div class="card empty">' + L('Nenhuma campanha com objetivo de conversão no filtro atual.', 'Ninguna campaña con objetivo de conversión en el filtro actual.') + '</div>';
@@ -1363,7 +1364,7 @@ function renderFunnels(per) {
 
   if (!camp) html += whyAlertHTML(fs.filter(function (f) { return (f === 'cadastro' || f === 'whatsapp') && buildFunnel(f, per).level < 4; }), per);
   v.innerHTML = html;
-  $$('[data-fc]', v).forEach(function (b) { b.onclick = function () { STATE.funCamp = b.dataset.fc === 'all' ? null : b.dataset.fc; renderFunnels(per); enhanceTables(); reportHeight(); }; });
+  $$('select[data-fc]', v).forEach(function (b) { b.onchange = function () { STATE.funCamp = b.value === 'all' ? null : b.value; renderFunnels(per); enhanceTables(); reportHeight(); }; });
   bindWhy(v);
 }
 
@@ -1620,6 +1621,18 @@ function renderCamp(per) {
 }
 
 /* ============================== CADASTROS (CRM) ============================== */
+/* Valores que a origem manda quando NÃO sabe: template não resolvido
+   ({{campaign.name}}), placeholders do Google/Meta ((not set), (Other),
+   Unknown) e vazios disfarçados. Tratar como "sem informação" é mais honesto
+   que exibir como se fosse uma campanha, e some da cara do cliente. */
+function valorVazio(v) {
+  var t = String(v == null ? '' : v).trim();
+  if (!t) return true;
+  if (/^\{\{.*\}\}$/.test(t) || /^\$\{.*\}$/.test(t)) return true;   // template não substituído
+  var n = norm(t).replace(/[()\[\]]/g, '').trim();
+  return ['unknown', 'undefined', 'null', 'none', 'not set', 'no set', 'nao definido', 'não definido', 'sin definir',
+          'other', 'others', 'outro', 'outros', 'n/a', 'na', '-', '--', '0', 'desconhecido', 'desconocido', 'sem informacao'].indexOf(n) > -1;
+}
 function isQuestionField(h) {
   var n = norm(h); if (!n) return false;
   var skip = ['nome', 'nome completo', 'name', 'full name', 'email', 'e-mail', 'telefone', 'phone', 'celular', 'whatsapp', 'data', 'dia', 'date', 'timestamp', 'created time', 'created at', 'data de cadastro', 'data de inscricao', 'horario de envio', 'id', 'lead id', 'form id', 'campanha', 'campaign', 'conjunto de anuncios', 'ad set', 'adset', 'anuncio', 'ad name', 'conta', 'account', 'plataforma', 'platform'];
@@ -1700,10 +1713,9 @@ function renderCRM(per) {
     filtro = '<div class="card"><h3>' + L('Campanha de origem', 'Campaña de origen') + '</h3>' +
       '<p class="mut" style="font-size:12.5px">' + L('Vem da UTM registrada no cadastro. Escolha uma campanha para ver o perfil só dos contatos que ela trouxe.', 'Viene de la UTM registrada en el registro. Elegí una campaña para ver el perfil solo de los contactos que trajo.') + '</p>' +
       cobUtm() +
-      '<div class="hsw"><div class="pills scrollx hs" style="margin-top:10px">' +
-      '<button class="pill' + (sel === 'all' ? ' on' : '') + '" data-utm="all">' + L('Todas', 'Todas') + '</button>' +
-      lista.map(function (u) { return '<button class="pill' + (sel === u ? ' on' : '') + '" data-utm="' + esc(u) + '">' + nameHTML(pretty(u)) + ' <span class="mut">' + camps[u] + '</span></button>'; }).join('') +
-      '</div></div></div>';
+      '<select class="fsel" data-utm style="margin-top:10px"><option value="all"' + (sel === 'all' ? ' selected' : '') + '>' + L('Todas as campanhas', 'Todas las campañas') + '</option>' +
+      lista.map(function (u) { return '<option value="' + esc(u) + '"' + (sel === u ? ' selected' : '') + '>' + esc(pretty(u)) + ' (' + camps[u] + ')</option>'; }).join('') +
+      '</select></div>';
   } else if (temUtm && lista.length === 1) {
     filtro = '<div class="card"><p class="mut" style="margin:0;font-size:13px">' + L('Todos os cadastros do período vieram da campanha ', 'Todos los registros del período vinieron de la campaña ') + '<b style="color:var(--tx)">' + nameHTML(pretty(lista[0])) + '</b>.</p></div>';
   }
@@ -1721,7 +1733,7 @@ function renderCRM(per) {
     order.forEach(function (k) {
       if (!campoPermitido(k)) return;
       var counts = {}, answered = 0;
-      fields[k].forEach(function (x) { var t = String(x == null ? '' : x).trim(); if (!t || t === '-' || (parseDate(t) && /\d{4}|\d\/\d/.test(t))) return; t = pretty(t); answered++; counts[t] = (counts[t] || 0) + 1; });
+      fields[k].forEach(function (x) { var t = String(x == null ? '' : x).trim(); if (valorVazio(t) || (parseDate(t) && /\d{4}|\d\/\d/.test(t))) return; t = pretty(t); answered++; counts[t] = (counts[t] || 0) + 1; });
       var e = Object.keys(counts).map(function (x) { return [x, counts[x]]; }).sort(function (a, b) { return b[1] - a[1]; });
       /* Independente do nome da coluna: se as respostas são links, identificadores
          numéricos longos ou textos enormes, não é uma pergunta de perfil. */
@@ -1748,7 +1760,7 @@ function renderCRM(per) {
   }
   if (!hasStatus) html = whyAlertHTML(['cadastro'], per) + html;
   v.innerHTML = html;
-  $$('[data-utm]', v).forEach(function (b) { b.onclick = function () { STATE.crmUtm = b.dataset.utm === 'all' ? null : b.dataset.utm; renderCRM(per); enhanceTables(); reportHeight(); }; });
+  $$('select[data-utm]', v).forEach(function (b) { b.onchange = function () { STATE.crmUtm = b.value === 'all' ? null : b.value; renderCRM(per); enhanceTables(); reportHeight(); }; });
   bindWhy(v);
 }
 /* ============================== RITMO DE VERBA ============================== */
