@@ -6,7 +6,7 @@
 (function () {
 'use strict';
 
-var VERSION = '1.7.2';
+var VERSION = '1.8.0';
 var D = window.DASH || {};
 var ROOT = document.getElementById(D.elemento || 'dash');
 if (!ROOT) return;
@@ -721,12 +721,22 @@ var BENCH = {
 };
 
 /* Monta as etapas de um funil com números do período atual e anterior. */
-function buildFunnel(f, per) {
-  var ext = function (r) { return r.funnel === f; };
+function buildFunnel(f, per, camp) {
+  var ext = function (r) { return r.funnel === f && (!camp || r.key === camp); };
   var cur = agg(filtered(per.from, per.to, ext)), prev = agg(filtered(per.pFrom, per.pTo, ext));
   var crmSrc = STATE.sources.some(function (s) { return s.tipo === 'crm' && (s.funil || 'cadastro') === f; });
   var crmStatus = STATE.sources.some(function (s) { return s.tipo === 'crm' && (s.funil || 'cadastro') === f && s.status.hasStatus; });
-  var cc = crmIn(per.from, per.to, f), cp = crmIn(per.pFrom, per.pTo, f);
+  /* Com uma campanha selecionada, os contatos só entram se a UTM registrada
+     no cadastro bater com o nome dela. Quem chegou sem UTM não é atribuível a
+     campanha nenhuma e fica de fora, por isso a ressalva no cabeçalho. */
+  var nomeCamp = camp && STATE.camp[camp] ? norm(camp.split('||')[2] || '') : '';
+  var casaUtm = function (x) {
+    if (!camp) return true;
+    var u = norm(x.utm || '');
+    if (!u || !nomeCamp) return false;
+    return u === nomeCamp || u.indexOf(nomeCamp) > -1 || nomeCamp.indexOf(u) > -1;
+  };
+  var cc = crmIn(per.from, per.to, f).filter(casaUtm), cp = crmIn(per.pFrom, per.pTo, f).filter(casaUtm);
   var crmCur = { n: cc.length, qual: cc.filter(function (x) { return x.qual; }).length, sale: cc.filter(function (x) { return x.sale; }).length, value: cc.reduce(function (a, x) { return a + x.value; }, 0) };
   var crmPrev = { n: cp.length, qual: cp.filter(function (x) { return x.qual; }).length, sale: cp.filter(function (x) { return x.sale; }).length, value: cp.reduce(function (a, x) { return a + x.value; }, 0) };
   var useLpv = STATE.has.lpv && cur.lpv + prev.lpv > 0 && (f === 'vendas' || f === 'trafego' || (f === 'cadastro' && cur.lpv > 0));
@@ -1312,20 +1322,51 @@ function visualFunnel(F) {
 }
 function renderFunnels(per) {
   var v = $('#v-funnels'), fs = funnelsPresent().filter(function (f) { return f !== 'outros'; }), html = '';
-  if (!fs.length) html += '<div class="card empty">' + L('Nenhuma campanha com objetivo de conversão no filtro atual.', 'Ninguna campaña con objetivo de conversión en el filtro actual.') + '</div>';
-  fs.forEach(function (f) {
-    var F = buildFunnel(f, per);
-    html += '<div class="card hl"><div class="bar"><h2>' + FNAME(f) + '</h2><span class="mut" style="font-size:12.5px">' + L('investido', 'invertido') + ' <b style="color:var(--tx)">' + money(F.cur.spend) + '</b></span></div>' +
 
+  /* Só as campanhas que investiram DENTRO do período selecionado. Se o período
+     muda, a lista muda junto: não faz sentido oferecer filtro de campanha que
+     não rodou. */
+  var noPeriodo = {};
+  filtered(per.from, per.to).forEach(function (r) {
+    if (r.spend <= 0 || fs.indexOf(r.funnel) < 0) return;
+    var c = noPeriodo[r.key] || (noPeriodo[r.key] = { key: r.key, name: r.campaign, f: r.funnel, spend: 0 });
+    c.spend += r.spend;
+  });
+  var opcoes = Object.keys(noPeriodo).map(function (k) { return noPeriodo[k]; }).sort(function (a, b) { return b.spend - a.spend; });
+  var camp = STATE.funCamp && noPeriodo[STATE.funCamp] ? STATE.funCamp : null;
+  if (STATE.funCamp && !camp) STATE.funCamp = null;   // campanha não rodou neste período
+
+  if (opcoes.length > 1) {
+    html += '<div class="card"><h3>' + L('Campanha', 'Campaña') + '</h3>' +
+      '<p class="mut" style="font-size:12.5px">' + L('Só aparecem campanhas que investiram no período selecionado. Escolher uma recalcula o funil inteiro só com ela.', 'Solo aparecen campañas que invirtieron en el período seleccionado. Elegir una recalcula el embudo entero solo con ella.') + '</p>' +
+      '<div class="hsw"><div class="pills scrollx hs" style="margin-top:10px">' +
+      '<button class="pill' + (camp ? '' : ' on') + '" data-fc="all">' + L('Todas', 'Todas') + '</button>' +
+      opcoes.map(function (c) { return '<button class="pill' + (camp === c.key ? ' on' : '') + '" data-fc="' + esc(c.key) + '">' + nameHTML(c.name) + ' <span class="mut">' + moneyShort(c.spend) + '</span></button>'; }).join('') +
+      '</div></div></div>';
+  }
+
+  if (!fs.length) html += '<div class="card empty">' + L('Nenhuma campanha com objetivo de conversão no filtro atual.', 'Ninguna campaña con objetivo de conversión en el filtro actual.') + '</div>';
+
+  fs.forEach(function (f) {
+    if (camp && noPeriodo[camp].f !== f) return;   // a campanha escolhida pertence a um funil só
+    var F = buildFunnel(f, per, camp);
+    var ntCamp = '';
+    if (camp) {
+      var totCrm = crmIn(per.from, per.to, f).length, usados = F.crmCur.n;
+      if (totCrm > 0) ntCamp = nota(L('Com uma campanha selecionada, só entram os contatos cuja UTM bate com o nome dela: ', 'Con una campaña seleccionada, solo entran los contactos cuya UTM coincide con su nombre: ') +
+        usados + L(' de ', ' de ') + totCrm + L(' cadastros do período. Quem chegou sem UTM não é atribuível a nenhuma campanha e fica de fora desta visão.', ' registros del período. Quien llegó sin UTM no es atribuible a ninguna campaña y queda fuera de esta vista.'));
+    }
+    html += '<div class="card hl"><div class="bar"><h2>' + FNAME(f) + (camp ? ' <span class="tag ac">' + nameHTML(noPeriodo[camp].name) + '</span>' : '') + ntCamp + '</h2><span class="mut" style="font-size:12.5px">' + L('investido', 'invertido') + ' <b style="color:var(--tx)">' + money(F.cur.spend) + '</b></span></div>' +
       visualFunnel(F) +
       '<div class="sec" style="margin-top:14px">' + L('O que conseguimos medir', 'Lo que podemos medir') + '</div><div class="ladder">' + LEVELS().map(function (l, i) { return '<div class="step' + (F.level > i ? ' done' : '') + '">' + (F.level > i ? '✓ ' : '') + l + '</div>'; }).join('') + '</div></div>';
   });
-  html += whyAlertHTML(fs.filter(function (f) { return (f === 'cadastro' || f === 'whatsapp') && buildFunnel(f, per).level < 4; }), per);
+
+  if (!camp) html += whyAlertHTML(fs.filter(function (f) { return (f === 'cadastro' || f === 'whatsapp') && buildFunnel(f, per).level < 4; }), per);
   v.innerHTML = html;
+  $$('[data-fc]', v).forEach(function (b) { b.onclick = function () { STATE.funCamp = b.dataset.fc === 'all' ? null : b.dataset.fc; renderFunnels(per); enhanceTables(); reportHeight(); }; });
   bindWhy(v);
 }
 
-/* ============================== POR QUE ANOTAR (explicação interativa) ============================== */
 function whyDataHTML(f, per) {
   var rk = RESULT(f), m = {};
   filtered(per.from, per.to, function (r) { return r.funnel === f; }).forEach(function (r) { var c = m[r.key] || (m[r.key] = { name: r.campaign, spend: 0, res: 0 }); c.spend += r.spend; c.res += r[rk]; });
