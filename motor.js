@@ -299,12 +299,23 @@ function findHeaderRow(rows) {
   }
   return 0;
 }
+/* "12.686" é ambíguo: pode ser doze mil e seiscentos em pt-BR ou doze vírgula
+   seiscentos em inglês. Já "4272778.196689775" e "1.234.567,89" não deixam
+   dúvida. Por isso a evidência inequívoca vale 4 e a ambígua vale 1: basta um
+   punhado de números com muitas casas para decidir o arquivo inteiro. */
 function detectLocale(values) {
   var comma = 0, dot = 0;
   values.forEach(function (v) {
     var s = String(v).replace(/[^\d,.\-]/g, '');
-    if (/^-?\d{1,3}(\.\d{3})+(,\d+)?$/.test(s) || /^-?\d+,\d{1,2}$/.test(s) || /^-?\d+,\d{4,}$/.test(s)) comma++;
-    else if (/^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(s) || /^-?\d+\.\d{1,2}$/.test(s) || /^-?\d+\.\d{4,}$/.test(s)) dot++;
+    if (!s || !/\d/.test(s)) return;
+    if (/^-?\d{1,3}(\.\d{3})+,\d+$/.test(s)) { comma += 4; return; }   // 1.234.567,89
+    if (/^-?\d{1,3}(,\d{3})+\.\d+$/.test(s)) { dot += 4; return; }     // 1,234,567.89
+    if (/^-?\d+,\d{4,}$/.test(s)) { comma += 4; return; }               // 123,456789
+    if (/^-?\d+\.\d{4,}$/.test(s)) { dot += 4; return; }                // 123.456789
+    if (/^-?\d+,\d{1,2}$/.test(s)) { comma += 2; return; }              // 123,45
+    if (/^-?\d+\.\d{1,2}$/.test(s)) { dot += 2; return; }               // 123.45
+    if (/^-?\d{1,3}(\.\d{3})+$/.test(s)) { comma += 1; return; }        // 12.686 (ambíguo)
+    if (/^-?\d{1,3}(,\d{3})+$/.test(s)) { dot += 1; return; }           // 12,686 (ambíguo)
   });
   return comma > dot ? 'comma' : 'dot';
 }
@@ -425,7 +436,9 @@ function processCRM(src, text) {
   var valueIdx = src.colunaValor ? normed.indexOf(norm(src.colunaValor)) : normed.findIndex(function (x) { return /valor da venda|valor venda|receita|ticket|valor fechado/.test(x); });
   st.headers = header; st.map = { date: map.date, status: statusIdx > -1 ? statusIdx : undefined, value: valueIdx > -1 ? valueIdx : undefined }; st.headerRow = h;
   if (map.date == null) { st.error = L('Nenhuma coluna de data encontrada.', 'No se encontró columna de fecha.'); return []; }
-  var num = makeNum(detectLocale(rows.slice(h + 1, h + 200).map(function (r) { return valueIdx > -1 ? r[valueIdx] : ''; })));
+  var sampleC = [];
+  rows.slice(h + 1, h + 200).forEach(function (r) { r.forEach(function (cell) { if (cell) sampleC.push(cell); }); });
+  var num = makeNum(src.decimal === 'comma' || src.decimal === 'dot' ? src.decimal : detectLocale(sampleC));
   var out = [];
   rows.slice(h + 1).forEach(function (r) {
     var d = parseDate(r[map.date]); if (!d) return;
@@ -1343,23 +1356,6 @@ function renderCamp(per) {
       return '<tr' + (idx >= 5 ? ' class="more"' : '') + '><td>' + tags(r) + '<div>' + nameHTML(r.name) + '</div></td><td>' + money(r.spendNow) + '</td><td class="prev">' + money(r.spendPrev) + '</td><td>' + (rk ? count(r.resNow) + ' <small class="mut">' + RNAME(r.f) + '</small>' : '—') + '</td><td class="prev">' + (rk ? count(r.resPrev) : '—') + '</td><td>' + money(r.cprNow) + '</td><td class="prev">' + money(r.cprPrev) + '</td>' + (hasRev ? '<td>' + xf(r.roasNow) + '</td>' : '') + '</tr>';
     }).join('') : '<tr><td colspan="8" class="empty">' + L('Sem campanhas no período.', 'Sin campañas.') + '</td></tr>') + '</tbody></table>') + '</div></div>';
   if (rows.length > 5) html = html.replace(/<\/div>$/, '') + '<button class="btn" id="dzAll" style="margin-top:10px;width:100%">' + (STATE.campAll ? L('Mostrar só as 5 maiores', 'Mostrar solo las 5 mayores') : L('Ver todas as campanhas', 'Ver todas las campañas') + ' (' + rows.length + ')') + '</button></div>';
-  if (STATE.gconv.length) {
-    var gm = {};
-    STATE.gconv.filter(function (g) { return inRange(g.date, per.from, per.to); }).forEach(function (g) { var a = gm[g.action] || (gm[g.action] = { conv: 0, value: 0 }); a.conv += g.conv; a.value += g.value; });
-    var gl = Object.keys(gm).map(function (k) { return [k, gm[k]]; }).sort(function (a, b) { return b[1].conv - a[1].conv; });
-    var gTot = gl.reduce(function (a, x) { return { conv: a.conv + x[1].conv, value: a.value + x[1].value }; }, { conv: 0, value: 0 });
-    var gRev = 0, gConv = 0;
-    filtered(per.from, per.to, function (r) { return r.platform === 'google'; }).forEach(function (r) { gRev += r.revenue; gConv += r.purchases; });
-    var diff = gRev > 0 ? Math.abs(gTot.value - gRev) / gRev : 0;
-    html += '<div class="card"><h2>' + L('Google Ads · de onde vem o resultado', 'Google Ads · de dónde viene el resultado') + '</h2>' +
-      '<p class="mut" style="font-size:12.5px">' + L('Só do Google Ads, e só das ações de conversão configuradas na conta. Não inclui o Meta.', 'Solo de Google Ads, y solo de las acciones de conversión configuradas en la cuenta. No incluye Meta.') + '</p>' +
-      tableWrap('<table><thead><tr><th>' + L('Ação de conversão', 'Acción de conversión') + '</th><th>' + L('Conversões', 'Conversiones') + '</th><th>' + L('Valor', 'Valor') + '</th></tr></thead><tbody>' +
-      (gl.length ? gl.map(function (x) { return '<tr><td>' + esc(x[0]) + '</td><td>' + nf(x[1].conv, 1) + '</td><td>' + money(x[1].value) + '</td></tr>'; }).join('') : '<tr><td colspan="3" class="empty">—</td></tr>') +
-      '</tbody><tfoot><tr><td><b>' + L('Soma desta tabela', 'Suma de esta tabla') + '</b></td><td><b>' + nf(gTot.conv, 1) + '</b></td><td><b>' + money(gTot.value) + '</b></td></tr>' +
-      '<tr class="prev"><td>' + L('Google Ads no relatório de campanhas', 'Google Ads en el reporte de campañas') + '</td><td>' + nf(gConv, 1) + '</td><td>' + money(gRev) + '</td></tr></tfoot></table>') +
-      (diff > 0.02 ? '<p class="mut" style="font-size:12.5px;margin-top:10px">' + L('As duas linhas deveriam bater. Diferença de ', 'Las dos líneas deberían coincidir. Diferencia de ') + pctf(diff, 1) + L('. Causas possíveis: a planilha de conversões por tipo cobre um período diferente da de campanhas, ou uma das duas tem linhas repetidas na origem. Confira na aba Diagnóstico.', '. Causas posibles: la planilla de conversiones por tipo cubre un período distinto al de campañas, o una de las dos tiene filas repetidas en el origen. Revisá en la pestaña Diagnóstico.') + '</p>' : '') +
-      '</div>';
-  }
   var ins = insights(per);
   html += '<div class="card"><h2>' + L('O que os números dizem', 'Lo que dicen los números') + '</h2><p class="mut" style="font-size:12px">' + L('Leituras automáticas: apontam onde olhar, não são certezas.', 'Lecturas automáticas: señalan dónde mirar, no son certezas.') + '</p>' +
     (ins.length ? ins.map(insightHTML).join('') : '<div class="empty">' + L('Sem pontos de atenção no período.', 'Sin puntos de atención.') + '</div>') + '</div>';
