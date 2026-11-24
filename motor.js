@@ -6,7 +6,7 @@
 (function () {
 'use strict';
 
-var VERSION = '1.15.0';
+var VERSION = '1.16.0';
 var D = window.DASH || {};
 var ROOT = document.getElementById(D.elemento || 'dash');
 if (!ROOT) return;
@@ -920,16 +920,19 @@ function buildFunnel(f, per, camp) {
   }
   var resKey = RESULT(f);
   if (f === 'cadastro' || f === 'whatsapp') {
-    if (crmSrc) st('crm', L('Chegaram ao comercial', 'Llegaron a ventas'), crmCur.n, crmPrev.n, resKey, null, { rateKey: 'crm' });
+    /* DASH.funilSimples: tira a etapa "Chegaram ao comercial" e usa os nomes Leads / Qualificados / Vendas */
+    var simples = !!D.funilSimples, qFrom = simples ? resKey : 'crm';
+    if (simples) { S.forEach(function (x) { if (x.key === 'leads') x.label = L('Leads', 'Leads'); }); }
+    else if (crmSrc) st('crm', L('Chegaram ao comercial', 'Llegaron a ventas'), crmCur.n, crmPrev.n, resKey, null, { rateKey: 'crm' });
     else st('crm', L('Chegaram ao comercial', 'Llegaron a ventas'), null, null, resKey, null, { missing: 'crm' });
     if (crmStatus) {
       var fonteQual = STATE.sources.filter(function (x) { return x.tipo === 'crm' && x.status && x.status.etapa; })[0];
-      st('qual', L('Qualificados', 'Calificados') + (regraQual ? nota(L('Critério da empresa: ', 'Criterio de la empresa: ') + esc(regraQual) + '.') : '') + (fonteQual ? nota(L('Os qualificados vêm de uma lista própria (', 'Los calificados vienen de una lista propia (') + esc(fonteQual.nome || fonteQual.etapa) + L('), separada da lista de cadastros. Se um contato qualificado não estiver também na lista de cadastros, a taxa de passagem entre as duas etapas fica subestimada.', '), separada de la lista de registros. Si un contacto calificado no está también en la lista de registros, la tasa de paso entre las dos etapas queda subestimada.')) : ''), crmCur.qual, crmPrev.qual, 'crm', BENCH.qualRate, { rateKey: 'qual' });
-      if (crmSales) st('sale', L('Compraram', 'Compraron'), crmCur.sale, crmPrev.sale, 'qual', BENCH.saleRate, { rateKey: 'sale', sale: true });
-      else st('sale', L('Compraram', 'Compraron'), null, null, 'qual', null, { missing: 'sale' });
+      st('qual', L('Qualificados', 'Calificados') + (regraQual ? nota(L('Critério da empresa: ', 'Criterio de la empresa: ') + esc(regraQual) + '.') : '') + (fonteQual ? nota(L('Os qualificados vêm de uma lista própria (', 'Los calificados vienen de una lista propia (') + esc(fonteQual.nome || fonteQual.etapa) + L('), separada da lista de cadastros. Se um contato qualificado não estiver também na lista de cadastros, a taxa de passagem entre as duas etapas fica subestimada.', '), separada de la lista de registros. Si un contacto calificado no está también en la lista de registros, la tasa de paso entre las dos etapas queda subestimada.')) : ''), crmCur.qual, crmPrev.qual, qFrom, BENCH.qualRate, { rateKey: 'qual' });
+      if (crmSales) st('sale', (simples ? L('Vendas', 'Ventas') : L('Compraram', 'Compraron')), crmCur.sale, crmPrev.sale, 'qual', BENCH.saleRate, { rateKey: 'sale', sale: true });
+      else st('sale', (simples ? L('Vendas', 'Ventas') : L('Compraram', 'Compraron')), null, null, 'qual', null, { missing: 'sale' });
     } else {
-      st('qual', L('Qualificados', 'Calificados'), null, null, 'crm', null, { missing: 'qual' });
-      st('sale', L('Compraram', 'Compraron'), null, null, 'qual', null, { missing: 'sale' });
+      st('qual', L('Qualificados', 'Calificados'), null, null, qFrom, null, { missing: 'qual' });
+      st('sale', (simples ? L('Vendas', 'Ventas') : L('Compraram', 'Compraron')), null, null, 'qual', null, { missing: 'sale' });
     }
   }
   var byKey = {}; S.forEach(function (s) { byKey[s.key] = s; });
