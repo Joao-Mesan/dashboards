@@ -6,7 +6,7 @@
 (function () {
 'use strict';
 
-var VERSION = '1.14.0';
+var VERSION = '1.15.0';
 var D = window.DASH || {};
 var ROOT = document.getElementById(D.elemento || 'dash');
 if (!ROOT) return;
@@ -68,6 +68,7 @@ function addDays(iso, n) { var a = iso.split('-').map(Number); return isoOf(new 
 function daysBetween(a, b) { return Math.round((new Date(b + 'T00:00:00') - new Date(a + 'T00:00:00')) / 864e5); }
 function monthStart(iso) { return iso.slice(0, 8) + '01'; }
 function monthEnd(iso) { var y = +iso.slice(0, 4), m = +iso.slice(5, 7); return iso.slice(0, 8) + p2(new Date(y, m, 0).getDate()); }
+function shiftMonths(iso, n) { var y = +iso.slice(0, 4), m = +iso.slice(5, 7), d = +iso.slice(8, 10), last = new Date(y, m - 1 + n + 1, 0).getDate(); return isoOf(new Date(y, m - 1 + n, Math.min(d, last))); }
 function prevMonthStart(iso) { var y = +iso.slice(0, 4), m = +iso.slice(5, 7); return isoOf(new Date(y, m - 2, 1)); }
 function fmtD(iso, year) { if (!iso) return '—'; var s = iso.slice(8, 10) + '/' + iso.slice(5, 7); return year ? s + '/' + iso.slice(0, 4) : s; }
 function parseDate(v) {
@@ -476,7 +477,7 @@ function classifyCampaigns(rows) {
 /* ============================== ESTADO ============================== */
 var STATE = {
   sources: [], rows: [], crm: [], gconv: [], social: [], has: {}, hasSoc: {}, socRedes: {}, camp: {},
-  preset: store.get('preset', 'mtd'), from: null, to: null, incToday: false,
+  preset: store.get('preset', 'mtd'), from: null, to: null, incToday: false, cmp: 'prev', cFrom: null, cTo: null,
   plat: 'all', acct: 'all', chartMetric: 'spend', sort: { col: 'spendNow', dir: -1 },
   loadedAt: null
 };
@@ -831,7 +832,11 @@ function resolvePeriod() {
   else if (p === 'mtd') { from = monthStart(today); to = end < from ? from : end; pFrom = prevMonthStart(today); pTo = addDays(from, -1); }
   else if (p === 'lastmonth') { to = addDays(monthStart(today), -1); from = monthStart(to); pTo = addDays(from, -1); pFrom = monthStart(pTo); }
   else { var len = parseInt(p, 10) || 30; to = end; from = addDays(to, -(len - 1)); pTo = addDays(from, -1); pFrom = addDays(pTo, -(len - 1)); }
-  return { from: from, to: to, pFrom: pFrom, pTo: pTo, len: daysBetween(from, to) + 1, pLen: daysBetween(pFrom, pTo) + 1, isMtd: p === 'mtd' };
+  /* Período de comparação escolhido pela pessoa (padrão: o período imediatamente anterior) */
+  var cmpMode = 'prev';
+  if (STATE.cmp === 'month' || STATE.cmp === 'year') { var sh = STATE.cmp === 'month' ? -1 : -12; pFrom = shiftMonths(from, sh); pTo = shiftMonths(to, sh); cmpMode = STATE.cmp; }
+  else if (STATE.cmp === 'custom' && STATE.cFrom && STATE.cTo && STATE.cFrom <= STATE.cTo) { pFrom = STATE.cFrom; pTo = STATE.cTo; cmpMode = 'custom'; }
+  return { from: from, to: to, pFrom: pFrom, pTo: pTo, len: daysBetween(from, to) + 1, pLen: daysBetween(pFrom, pTo) + 1, isMtd: p === 'mtd', cmpMode: cmpMode };
 }
 function daySeries(from, to, extra) {
   var map = {}, out = [];
@@ -1176,6 +1181,8 @@ function shell() {
     [['7', L('7 dias', '7 días')], ['14', L('14 dias', '14 días')], ['30', L('30 dias', '30 días')], ['mtd', L('Este mês', 'Este mes')], ['lastmonth', L('Mês passado', 'Mes pasado')], ['custom', L('Escolher datas', 'Elegir fechas')]].map(function (p) { return '<button class="pill" data-p="' + p[0] + '">' + p[1] + '</button>'; }).join('') +
     '</div><div class="row" style="margin-top:10px"><span id="dzCustom" style="display:none"><input type="date" id="dzFrom"> → <input type="date" id="dzTo"></span>' +
     '<select id="dzPlat"></select><select id="dzAcct"></select>' +
+    '<label class="mut" style="font-size:12.5px">' + L('Comparar com', 'Comparar con') + ' <select id="dzCmp"><option value="prev">' + L('Período anterior', 'Período anterior') + '</option><option value="month">' + L('Mesmo período do mês anterior', 'Mismo período del mes anterior') + '</option><option value="year">' + L('Mesmo período do ano anterior', 'Mismo período del año anterior') + '</option><option value="custom">' + L('Escolher datas…', 'Elegir fechas…') + '</option></select></label>' +
+    '<span id="dzCmpCustom" style="display:none"><input type="date" id="dzCFrom"> → <input type="date" id="dzCTo"></span>' +
     '<label class="mut" style="font-size:12.5px"><input type="checkbox" id="dzToday"> ' + L('Incluir hoje', 'Incluir hoy') + '</label></div>' +
     '<div id="dzPer" class="mut" style="font-size:12.5px;margin-top:10px"></div></div>' +
     '<div class="hsw tabsw"><div class="tw-hint">' + L('arraste para ver mais abas →', 'deslizá para ver más pestañas →') + '</div><div class="tabs hs" id="dzTabs">' + orderedTabs().map(function (t) { return '<button data-tab="' + t[0] + '">' + t[1]() + '</button>'; }).join('') + '</div></div>' +
@@ -1190,6 +1197,8 @@ function bindShell() {
   $$('#dzPresets .pill').forEach(function (b) { b.onclick = function () { STATE.preset = b.dataset.p; store.set('preset', STATE.preset); renderAll(); }; });
   $('#dzFrom').onchange = $('#dzTo').onchange = function () { STATE.from = $('#dzFrom').value; STATE.to = $('#dzTo').value; if (STATE.from && STATE.to) renderAll(); };
   $('#dzToday').onchange = function () { STATE.incToday = this.checked; renderAll(); };
+  $('#dzCmp').onchange = function () { STATE.cmp = this.value; renderAll(); };
+  $('#dzCFrom').onchange = $('#dzCTo').onchange = function () { STATE.cFrom = $('#dzCFrom').value; STATE.cTo = $('#dzCTo').value; if (STATE.cFrom && STATE.cTo) renderAll(); };
   $('#dzPlat').onchange = function () { STATE.plat = this.value; STATE.acct = 'all'; renderAll(); };
   $('#dzAcct').onchange = function () { STATE.acct = this.value; renderAll(); };
   $$('#dzTabs button').forEach(function (b) { b.onclick = function () { goTab(b.dataset.tab); }; });
@@ -1422,8 +1431,13 @@ function renderOverview(per) {
       kpi(L('Custo por ', 'Costo por ') + RNAME(f, false), cpr, ppr, money, true, L('investimento ÷ ', 'inversión ÷ ') + RNAME(f)) +
       kpi(L('Investido', 'Invertido'), c.spend, p.spend, money, false, L('só nas campanhas deste objetivo', 'solo en campañas de este objetivo'));
     if (isSale(f) && STATE.has.revenue && (!SALE_TYPES[f] || SALE_TYPES[f].receita)) boxes += kpi(L('Vendido', 'Vendido'), c.revenue, p.revenue, money, false, HELP('revenue')) + kpi('ROAS', c.roas, p.roas, xf, false, HELP('roas'));
-    if ((f === 'cadastro' || f === 'whatsapp') && F.crmSrc) boxes += kpi(L('No comercial', 'En ventas'), F.crmCur.n, F.crmPrev.n, count, false, HELP('crm'));
-    if (F.crmStatus) boxes += kpi(L('Vendas', 'Ventas'), F.crmCur.sale, F.crmPrev.sale, count, false, L('registradas pelo comercial', 'registradas por ventas'));
+    if (D.qualificacao && D.qualificacao.coluna && (f === 'cadastro' || f === 'whatsapp') && F.crmSrc) {
+      /* Com regra de qualificação, o cartão útil é o de qualificados (no lugar de "No comercial" e "Vendas") */
+      boxes += kpi(D.qualificacao.rotulo || L('Leads qualificados', 'Leads calificados'), F.crmCur.qual, F.crmPrev.qual, count, false, D.qualificacao.nome ? L('cadastros com ', 'registros con ') + D.qualificacao.nome : '');
+    } else {
+      if ((f === 'cadastro' || f === 'whatsapp') && F.crmSrc) boxes += kpi(L('No comercial', 'En ventas'), F.crmCur.n, F.crmPrev.n, count, false, HELP('crm'));
+      if (F.crmStatus) boxes += kpi(L('Vendas', 'Ventas'), F.crmCur.sale, F.crmPrev.sale, count, false, L('registradas pelo comercial', 'registradas por ventas'));
+    }
     boxes += '</div></div>';
   });
   if (boxes) html += '<div class="cols">' + boxes + '</div>';
@@ -2046,12 +2060,19 @@ function renderCRM(per) {
     var charts = '';
     order.forEach(function (k) {
       if (!campoPermitido(k)) return;
-      var counts = {}, answered = 0;
+      var counts = {}, answered = 0, presenca = (D.presenca || []).some(function (c) { return norm(c) === norm(k); });
+      if (presenca) {
+        /* Só interessa se preencheu ou não (ex: CNPJ): mostra Sim / Não e conta em branco como Não */
+        var rowsN = now.length;
+        fields[k].forEach(function (x) { var t = String(x == null ? '' : x).trim(); var yes = !valorVazio(t); var key = yes ? L('Sim', 'Sí') : L('Não', 'No'); counts[key] = (counts[key] || 0) + 1; });
+        var miss = rowsN - fields[k].length; if (miss > 0) { var kn = L('Não', 'No'); counts[kn] = (counts[kn] || 0) + miss; }
+        answered = rowsN;
+      } else
       fields[k].forEach(function (x) { var t = String(x == null ? '' : x).trim(); if (valorVazio(t) || (parseDate(t) && /\d{4}|\d\/\d/.test(t))) return; t = respostaNormalizada(k, t) || pretty(t); answered++; counts[t] = (counts[t] || 0) + 1; });
       var e = Object.keys(counts).map(function (x) { return [x, counts[x]]; }).sort(function (a, b) { return b[1] - a[1]; });
       /* Independente do nome da coluna: se as respostas são links, identificadores
          numéricos longos ou textos enormes, não é uma pergunta de perfil. */
-      if (!(Array.isArray(D.perguntas) && D.perguntas.length)) {
+      if (!presenca && !(Array.isArray(D.perguntas) && D.perguntas.length)) {
         var tecnico = 0, longos = 0;
         e.forEach(function (x) {
           var t = String(x[0]);
@@ -2061,14 +2082,14 @@ function renderCRM(per) {
         if (tecnico >= Math.max(1, Math.ceil(e.length * 0.4)) || longos >= Math.max(1, Math.ceil(e.length * 0.4))) return;
       }
       // resposta quase sempre diferente = texto livre, não categoria
-      if (!e.length || e.length > 15 || (answered > 3 && e.length / answered > 0.6)) return;
+      if (!e.length || e.length > 15 || (!presenca && answered > 3 && e.length / answered > 0.6)) return;
       var max = e[0][1];
       var dominante = e[0][1] / (answered || 1);
       if (e.length >= 2 && e.length <= DONUT_MAX && dominante <= 0.9) {
-        charts += '<div class="card"><h3>' + esc(pretty(k)) + '</h3><p class="mut" style="font-size:12px">' + answered + L(' de ', ' de ') + now.length + L(' responderam', ' respondieron') + notaResp(answered, now.length) + '</p>' + donutHTML(e, answered) + '</div>';
+        charts += '<div class="card"><h3>' + esc((D.titulos && D.titulos[k]) || pretty(k)) + '</h3><p class="mut" style="font-size:12px">' + answered + L(' de ', ' de ') + now.length + L(' responderam', ' respondieron') + notaResp(answered, now.length) + '</p>' + donutHTML(e, answered) + '</div>';
         return;
       }
-      charts += '<div class="card"><h3>' + esc(pretty(k)) + '</h3><p class="mut" style="font-size:12px">' + answered + L(' de ', ' de ') + now.length + L(' responderam', ' respondieron') + notaResp(answered, now.length) + '</p>' +
+      charts += '<div class="card"><h3>' + esc((D.titulos && D.titulos[k]) || pretty(k)) + '</h3><p class="mut" style="font-size:12px">' + answered + L(' de ', ' de ') + now.length + L(' responderam', ' respondieron') + notaResp(answered, now.length) + '</p>' +
         e.map(function (x) { return '<div class="brow"><div class="bl"><span>' + nameHTML(x[0]) + '</span><span>' + x[1] + ' · ' + pctf(x[1] / answered, 0) + '</span></div><div class="paceBar" style="margin:0;height:8px"><span style="width:' + (x[1] / max * 100) + '%;background:var(--ac)"></span></div></div>'; }).join('') + '</div>';
     });
     if (charts) html += '<div class="sec">' + L('O que as pessoas responderam', 'Lo que respondieron') + '</div><div class="grid g2">' + charts + '</div>';
@@ -2402,6 +2423,7 @@ function syncBar(per) {
   $$('#dzPresets .pill').forEach(function (b) { b.classList.toggle('on', b.dataset.p === STATE.preset); });
   $('#dzCustom').style.display = STATE.preset === 'custom' ? '' : 'none';
   $('#dzToday').checked = STATE.incToday;
+  $('#dzCmp').value = STATE.cmp; $('#dzCmpCustom').style.display = STATE.cmp === 'custom' ? '' : 'none';
   var plats = {}; STATE.rows.forEach(function (r) { plats[r.platform] = 1; });
   var pl = Object.keys(plats);
   $('#dzPlat').style.display = pl.length > 1 ? '' : 'none';
@@ -2410,7 +2432,7 @@ function syncBar(per) {
   var al = Object.keys(ac).sort();
   $('#dzAcct').style.display = al.length > 1 ? '' : 'none';
   $('#dzAcct').innerHTML = '<option value="all">' + L('Todas as contas', 'Todas las cuentas') + '</option>' + al.map(function (a) { return '<option' + (STATE.acct === a ? ' selected' : '') + '>' + esc(a) + '</option>'; }).join('');
-  $('#dzPer').innerHTML = '<b style="color:var(--tx)">' + fmtD(per.from) + ' → ' + fmtD(per.to) + '</b> · ' + L('comparado com', 'comparado con') + ' ' + fmtD(per.pFrom) + ' → ' + fmtD(per.pTo) + (per.isMtd ? ' (' + L('mês anterior inteiro', 'mes anterior completo') + ')' : '');
+  $('#dzPer').innerHTML = '<b style="color:var(--tx)">' + fmtD(per.from) + ' → ' + fmtD(per.to) + '</b> · ' + L('comparado com', 'comparado con') + ' ' + fmtD(per.pFrom, per.cmpMode !== 'prev') + ' → ' + fmtD(per.pTo, per.cmpMode !== 'prev') + (per.isMtd && per.cmpMode === 'prev' ? ' (' + L('mês anterior inteiro', 'mes anterior completo') + ')' : '');
   $('#dzUpd').textContent = STATE.loadedAt ? L('Dados lidos em ', 'Datos leídos el ') + STATE.loadedAt.toLocaleString(LOC()) + (lastDataDate() ? ' · ' + L('último dia com dados: ', 'último día con datos: ') + fmtD(lastDataDate(), 1) : '') : '';
 }
 function renderAll() {
