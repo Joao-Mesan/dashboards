@@ -6,7 +6,7 @@
 (function () {
 'use strict';
 
-var VERSION = '1.13.0';
+var VERSION = '1.14.0';
 var D = window.DASH || {};
 var ROOT = document.getElementById(D.elemento || 'dash');
 if (!ROOT) return;
@@ -52,6 +52,10 @@ function deltaTxt(c, p) {
   return { v: d, txt: (d > 0 ? '+' : '') + nf(d * 100, 0) + '%' };
 }
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+/* Nomes das plataformas de mídia (meta, google, openai). Qualquer outra vira Meta, como antes. */
+var PLAT_NOME = { meta: 'Meta Ads', google: 'Google Ads', openai: 'OpenAI Ads' }, PLAT_CURTO = { meta: 'Meta', google: 'Google', openai: 'OpenAI' };
+function platNome(p) { return PLAT_NOME[p] || 'Meta Ads'; }
+function platCurto(p) { return PLAT_CURTO[p] || 'Meta'; }
 function norm(s) { return String(s == null ? '' : s).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim(); }
 function $(s, c) { return (c || ROOT).querySelector(s); }
 function $$(s, c) { return Array.prototype.slice.call((c || ROOT).querySelectorAll(s)); }
@@ -308,15 +312,15 @@ function csvRows(text, delim) {
 var NOT_COST = /custo|cost|costo|\bcpc\b|\bcpm\b|\bctr\b|taxa|tasa|\brate\b|\/ /;
 var RULES = {
   date: { exact: ['dia', 'data', 'fecha', 'day', 'date', 'data real', 'created time', 'created_time', 'data de cadastro', 'data de inscricao', 'timestamp', 'horario de envio', 'submitted at'], re: [/^(dia|data|fecha|date|day)\b/, /created|timestamp|cadastro|inscri|envio/], not: [/atualiz|nascim/] },
-  campaign: { exact: ['campanha', 'nome da campanha', 'campana', 'nombre de la campana', 'campaign', 'campaign name'], re: [/campanha|campana|campaign/], not: [/^id|\bid\b|tipo|objetiv|objective|status|estado|orcamento|budget/] },
+  campaign: { exact: ['campanha', 'nome da campanha', 'campana', 'nombre de la campana', 'campaign', 'campaign name', 'campaign_name'], re: [/campanha|campana|campaign/], not: [/^id|\bid\b|_id$|tipo|objetiv|objective|status|estado|orcamento|budget/] },
   account: { exact: ['conta', 'nome da conta', 'nome da conta de anuncios', 'account', 'account name', 'cuenta', 'nombre de la cuenta'], re: [/nome da conta|account name|nombre de la cuenta/], not: [/\bid\b/] },
   objective: { exact: ['objetivo', 'objective', 'objetivo da campanha', 'objetivo de la campana'], re: [/^objetivo/, /objective/] },
   adset: { exact: ['nome do conjunto de anuncios', 'conjunto de anuncios', 'nombre del conjunto de anuncios', 'ad set name', 'grupo de anuncios'], re: [/conjunto de anuncio|ad set name|grupo de anuncio/], not: [/\bid\b/] },
   ad: { exact: ['nome do anuncio', 'anuncio', 'nombre del anuncio', 'ad name'], re: [/nome do anuncio|nombre del anuncio|^ad name$/], not: [/\bid\b/] },
-  spend: { exact: ['valor gasto', 'valor gasto (brl)', 'valor gasto (ars)', 'valor usado', 'valor usado (brl)', 'importe gastado', 'importe gastado (ars)', 'amount spent', 'custo', 'cost', 'investimento', 'inversion'], re: [/^valor (gasto|usado)/, /^importe gastado/, /^custo$/, /^cost$/, /amount spent/, /^investimento$/], not: [/por |\/|cpc|cpm|conv|lead|resultado/] },
+  spend: { exact: ['spend (brl)', 'spend', 'spent', 'valor gasto', 'valor gasto (brl)', 'valor gasto (ars)', 'valor usado', 'valor usado (brl)', 'importe gastado', 'importe gastado (ars)', 'amount spent', 'custo', 'cost', 'investimento', 'inversion'], re: [/^valor (gasto|usado)/, /^importe gastado/, /^custo$/, /^cost$/, /amount spent/, /^investimento$/], not: [/por |\/|cpc|cpm|conv|lead|resultado/] },
   impressions: { exact: ['impr', 'impr.', 'impressoes', 'impresiones', 'impressions'], re: [/^impr/, /impression/], not: [/%|ctr|custo|cost|cpm|taxa|parcela|share/] },
   clicks: { exact: ['cliques no link', 'clics en el enlace', 'link clicks', 'cliques', 'clics', 'clicks'], re: [/cliques no link|clics en el enlace|link clicks/, /^cliques/, /^clics/, /^clicks/], not: [/unicos|unique|ctr|custo|costo|cost|cpc|taxa|saida|outbound/] },
-  reach: { exact: ['alcance', 'reach'], re: [/^alcance/, /^reach/], not: [/custo|cost|costo|por /] },
+  reach: { exact: ['alcance', 'reach', 'impression_reach'], re: [/^alcance/, /^reach/], not: [/custo|cost|costo|por /] },
   frequency: { exact: ['frequencia', 'frecuencia', 'frequency'], re: [/^frequen|^frecuen/] },
   lpv: { exact: ['visualizacoes da pagina de destino', 'visualizaciones de la pagina de destino', 'landing page views'], re: [/pagina de destino|landing page view/], not: [NOT_COST] },
   conversations: { exact: ['conversas por mensagem iniciadas', 'conversas por mensagens iniciadas', 'conversas iniciadas por mensagem', 'conversas iniciadas por mensagens', 'conversas iniciadas', 'conversas', 'messaging conversations started', 'messaging conversation started', 'conversations started', 'conversaciones con mensajes iniciadas', 'conversaciones iniciadas'], re: [/\bconversas?\b|conversaciones|mensag|messaging conv/], not: [NOT_COST, /valor|value|compra|conversao|conversion/] },
@@ -498,7 +502,7 @@ function processMedia(src, text) {
     if (!date) { skipped++; return; }
     var o = {
       date: date, platform: platform,
-      account: (map.account != null && r[map.account]) ? String(r[map.account]).trim() : (src.conta || (platform === 'google' ? 'Google Ads' : 'Meta Ads')),
+      account: (map.account != null && r[map.account]) ? String(r[map.account]).trim() : (src.conta || platNome(platform)),
       campaign: String(r[map.campaign] || '(sem nome)').trim(),
       objective: map.objective != null ? String(r[map.objective] || '') : '',
       adset: map.adset != null ? String(r[map.adset] || '') : '',
@@ -520,6 +524,38 @@ function processMedia(src, text) {
 }
 var SALE_RE = /vend|vendid|fechad|ganh|\bwon\b|compr|contrat|matricul|cerrad|cliente fechado/;
 var QUAL_RE = /qualific|visita|agend|proposta|negoci|oportun|reuni|atendid|interesse|calificad/;
+
+/* ============================== QUALIFICAÇÃO POR REGRA / EQUIVALÊNCIAS ============================== */
+/* DASH.qualificacao = { coluna: 'Colaboradores', minimo: 140 }
+   Marca como qualificado todo cadastro cuja faixa numérica começa em 'minimo' ou mais
+   (ex: "140 a 500", "Acima de 500"). Faixa que começa abaixo (ex: "50-150") fica de fora
+   de propósito: não dá para saber se o contato está acima ou abaixo do corte.
+   DASH.equivalencias = { 'Cargo': { 'rh': 'RH / Gestão de Pessoas', ... } }
+   Junta respostas que são a mesma opção escrita de formas diferentes (só o que for listado). */
+function faixaCanonica(raw) {
+  if (raw == null) return null;
+  var s0 = String(raw).trim(); if (!s0 || s0 === '-') return null;
+  var n = norm(s0).replace(/_/g, ' '), m;
+  m = n.match(/(?:acima de|mais de)\s*(\d+)/) || n.match(/^(\d+)\s*\+$/); if (m) return 'Acima de ' + m[1];
+  m = n.match(/^ate\s*(\d+)/); if (m) return 'Até ' + m[1];
+  var nums = n.match(/\d+/g);
+  if (nums && nums.length >= 2) return nums[0] + ' a ' + nums[1];
+  if (nums && nums.length === 1) return nums[0];
+  return s0;
+}
+function faixaMin(raw) { var c = faixaCanonica(raw), m = c && String(c).match(/(\d+)/); return m ? parseInt(m[1], 10) : null; }
+function respostaNormalizada(campo, t) {
+  var q = D.qualificacao;
+  if (q && q.coluna && norm(campo) === norm(q.coluna)) return faixaCanonica(t) || t;
+  var eq = D.equivalencias || {}, hit = null;
+  Object.keys(eq).some(function (col) { if (norm(campo) === norm(col)) { hit = eq[col]; return true; } });
+  if (hit) {
+    var k = norm(String(t).replace(/_/g, ' ')).replace(/\s*\/\s*/g, ' / ');
+    var chaves = Object.keys(hit);
+    for (var i = 0; i < chaves.length; i++) if (norm(chaves[i]).replace(/\s*\/\s*/g, ' / ') === k) return hit[chaves[i]];
+  }
+  return null;
+}
 function processCRM(src, text) {
   var st = src.status;
   var rows = csvRows(text, detectDelim(text));
@@ -570,6 +606,7 @@ function processCRM(src, text) {
   // quando a própria planilha JÁ é a lista de qualificados (ou de vendas), não há
   // coluna de status: a etapa vem declarada na fonte
   var forcaQual = src.etapa === 'qualificado' || src.etapa === 'qual';
+  var qCol = (D.qualificacao && D.qualificacao.coluna) ? normed.indexOf(norm(D.qualificacao.coluna)) : -1, qMin = D.qualificacao ? (+D.qualificacao.minimo || 0) : 0;
   var forcaVenda = src.etapa === 'venda' || src.etapa === 'vendido';
   var utmIdx = src.colunaCampanha ? normed.indexOf(norm(src.colunaCampanha)) : normed.findIndex(function (x) { return /utm[_ ]?campaign|utm[_ ]?campanha|^campanha$|^campaign$|origem da campanha/.test(x); });
   var valueIdx = src.colunaValor ? normed.indexOf(norm(src.colunaValor)) : normed.findIndex(function (x) { return /valor da venda|valor venda|receita|ticket|valor fechado/.test(x); });
@@ -584,10 +621,11 @@ function processCRM(src, text) {
     var s = statusIdx > -1 ? norm(r[statusIdx]) : '';
     var sale = forcaVenda || (statusIdx > -1 && SALE_RE.test(s));
     var qual = sale || forcaQual || (statusIdx > -1 && QUAL_RE.test(s));
+    if (!qual && qCol > -1) { var fm = faixaMin(r[qCol]); if (fm != null && fm >= qMin) qual = true; }
     var raw = {}; header.forEach(function (hh, j) { raw[hh] = r[j] == null ? '' : r[j]; });
     out.push({ date: d, funnel: src.funil || 'cadastro', sale: sale, qual: qual, value: (sale && valueIdx > -1) ? num(r[valueIdx]) : 0, status: statusIdx > -1 ? String(r[statusIdx]).trim() : '', utm: (utmIdx > -1 && !valorVazio(r[utmIdx])) ? String(r[utmIdx]).trim() : '', etapa: src.etapa || '', raw: raw, src: src.nome || '' });
   });
-  st.rows = out.length; st.hasStatus = statusIdx > -1 || forcaQual || forcaVenda;
+  st.rows = out.length; st.hasStatus = statusIdx > -1 || forcaQual || forcaVenda; st.qualRule = qCol > -1; st.hasSales = statusIdx > -1 || forcaVenda;
   st.map.campanha = utmIdx > -1 ? utmIdx : undefined;
   st.etapa = src.etapa || '';
   return out;
@@ -831,7 +869,9 @@ function buildFunnel(f, per, camp) {
   var ext = function (r) { return r.funnel === f && (!camp || r.key === camp); };
   var cur = agg(filtered(per.from, per.to, ext)), prev = agg(filtered(per.pFrom, per.pTo, ext));
   var crmSrc = STATE.sources.some(function (s) { return s.tipo === 'crm' && (s.funil || 'cadastro') === f; });
-  var crmStatus = STATE.sources.some(function (s) { return s.tipo === 'crm' && (s.funil || 'cadastro') === f && s.status.hasStatus; });
+  var crmStatus = STATE.sources.some(function (s) { return s.tipo === 'crm' && (s.funil || 'cadastro') === f && (s.status.hasStatus || s.status.qualRule); });
+  var crmSales = STATE.sources.some(function (s) { return s.tipo === 'crm' && (s.funil || 'cadastro') === f && s.status.hasSales; });
+  var regraQual = D.qualificacao && D.qualificacao.coluna ? (D.qualificacao.nome || (D.qualificacao.coluna + ' ≥ ' + D.qualificacao.minimo)) : '';
   /* Com uma campanha selecionada, os contatos só entram se a UTM registrada
      no cadastro bater com o nome dela. Quem chegou sem UTM não é atribuível a
      campanha nenhuma e fica de fora, por isso a ressalva no cabeçalho. */
@@ -879,8 +919,9 @@ function buildFunnel(f, per, camp) {
     else st('crm', L('Chegaram ao comercial', 'Llegaron a ventas'), null, null, resKey, null, { missing: 'crm' });
     if (crmStatus) {
       var fonteQual = STATE.sources.filter(function (x) { return x.tipo === 'crm' && x.status && x.status.etapa; })[0];
-      st('qual', L('Qualificados', 'Calificados') + (fonteQual ? nota(L('Os qualificados vêm de uma lista própria (', 'Los calificados vienen de una lista propia (') + esc(fonteQual.nome || fonteQual.etapa) + L('), separada da lista de cadastros. Se um contato qualificado não estiver também na lista de cadastros, a taxa de passagem entre as duas etapas fica subestimada.', '), separada de la lista de registros. Si un contacto calificado no está también en la lista de registros, la tasa de paso entre las dos etapas queda subestimada.')) : ''), crmCur.qual, crmPrev.qual, 'crm', BENCH.qualRate, { rateKey: 'qual' });
-      st('sale', L('Compraram', 'Compraron'), crmCur.sale, crmPrev.sale, 'qual', BENCH.saleRate, { rateKey: 'sale', sale: true });
+      st('qual', L('Qualificados', 'Calificados') + (regraQual ? nota(L('Critério da empresa: ', 'Criterio de la empresa: ') + esc(regraQual) + '.') : '') + (fonteQual ? nota(L('Os qualificados vêm de uma lista própria (', 'Los calificados vienen de una lista propia (') + esc(fonteQual.nome || fonteQual.etapa) + L('), separada da lista de cadastros. Se um contato qualificado não estiver também na lista de cadastros, a taxa de passagem entre as duas etapas fica subestimada.', '), separada de la lista de registros. Si un contacto calificado no está también en la lista de registros, la tasa de paso entre las dos etapas queda subestimada.')) : ''), crmCur.qual, crmPrev.qual, 'crm', BENCH.qualRate, { rateKey: 'qual' });
+      if (crmSales) st('sale', L('Compraram', 'Compraron'), crmCur.sale, crmPrev.sale, 'qual', BENCH.saleRate, { rateKey: 'sale', sale: true });
+      else st('sale', L('Compraram', 'Compraron'), null, null, 'qual', null, { missing: 'sale' });
     } else {
       st('qual', L('Qualificados', 'Calificados'), null, null, 'crm', null, { missing: 'qual' });
       st('sale', L('Compraram', 'Compraron'), null, null, 'qual', null, { missing: 'sale' });
@@ -1508,7 +1549,7 @@ function whyDataHTML(f, per) {
   var data = { a: list[0], b: list[1], rn: RNAME(f, false), rns: RNAME(f) };
   return '<div class="why" data-why=\'' + esc(JSON.stringify(data)) + '\'>' +
     '<h2>💡 ' + L('Por que anotar o que acontece depois do contato?', '¿Por qué anotar lo que pasa después del contacto?') + '</h2>' +
-    '<p class="mut">' + L('Hoje o painel só enxerga até o ', 'Hoy el panel solo ve hasta la ') + data.rn + '. ' + L('Veja por que isso importa:', 'Mirá por qué importa:') + '</p>' +
+    '<p class="mut">' + (D.qualificacao && D.qualificacao.coluna ? L('Hoje o painel enxerga até os contatos qualificados, mas não até a venda. ', 'Hoy el panel ve hasta los contactos calificados, pero no hasta la venta. ') : L('Hoje o painel só enxerga até o ', 'Hoy el panel solo ve hasta la ') + data.rn + '. ') + L('Veja por que isso importa:', 'Mirá por qué importa:') + '</p>' +
     '<div class="sec">1. ' + L('Olhando só a plataforma', 'Mirando solo la plataforma') + (example ? ' <span class="tag hip">' + L('2ª campanha é exemplo', '2ª campaña es ejemplo') + '</span>' : '') + '</div>' +
     '<div class="vs"><div class="kpi win"><div class="n">' + nameHTML(data.a.name) + '</div><div class="v">' + money(data.a.cpr) + '</div><div class="c"><span>' + L('por ', 'por ') + data.rn + '</span></div></div>' +
     '<div class="kpi"><div class="n">' + nameHTML(data.b.name) + '</div><div class="v">' + money(data.b.cpr) + '</div><div class="c"><span>' + L('por ', 'por ') + data.rn + '</span></div></div></div>' +
@@ -1807,7 +1848,7 @@ function renderCamp(per) {
   var c = STATE.sort.col, d = STATE.sort.dir;
   rows.sort(function (a, b) { var x = a[c], y = b[c]; if (typeof x === 'string') return x.localeCompare(y) * d; x = ok(x) ? x : -Infinity; y = ok(y) ? y : -Infinity; return (x - y) * d; });
   var hasRev = STATE.has.revenue, multiAcct = Object.keys(rows.reduce(function (a, r) { a[r.acct] = 1; return a; }, {})).length > 1;
-  function tags(r) { return (multiAcct || STATE.has.revenue ? '<span class="tag">' + (r.plat === 'google' ? 'Google' : 'Meta') + (multiAcct && !/^(meta|google)( ads)?$/i.test(r.acct) ? ' · ' + esc(r.acct) : '') + '</span>' : '') + '<span class="tag ac" title="' + esc(L('Critério: ', 'Criterio: ') + (r.why || '')) + '">' + FNAME(r.f) + '</span>' + (r.isNew ? '<span class="tag real">' + L('nova', 'nueva') + '</span>' : '') + (r.ended ? '<span class="tag">' + L('parada', 'pausada') + '</span>' : ''); }
+  function tags(r) { return (multiAcct || STATE.has.revenue ? '<span class="tag">' + platCurto(r.plat) + (multiAcct && !/^(meta|google|openai)( ads)?$/i.test(r.acct) ? ' · ' + esc(r.acct) : '') + '</span>' : '') + '<span class="tag ac" title="' + esc(L('Critério: ', 'Criterio: ') + (r.why || '')) + '">' + FNAME(r.f) + '</span>' + (r.isNew ? '<span class="tag real">' + L('nova', 'nueva') + '</span>' : '') + (r.ended ? '<span class="tag">' + L('parada', 'pausada') + '</span>' : ''); }
   var html = '<div class="card' + (STATE.campAll ? ' showall' : '') + '" id="dzCampBox"><h2>' + L('Campanhas', 'Campañas') + '</h2><p class="mut" style="font-size:12.5px;margin-bottom:12px">' + L('Período atual em destaque à esquerda; as setas mostram a variação contra o período anterior (verde é melhora).', 'Período actual destacado a la izquierda; las flechas muestran la variación contra el período anterior (verde es mejora).') + '</p>';
   // Celular: cartões
   html += '<div class="only-narrow"><div class="row" style="margin-bottom:6px"><span class="mut" style="font-size:12.5px">' + L('Ordenar por', 'Ordenar por') + '</span><select id="dzSortN"><option value="spendNow">' + L('Investimento', 'Inversión') + '</option><option value="resNow">' + L('Resultados', 'Resultados') + '</option><option value="cprNow">' + L('Custo por resultado', 'Costo por resultado') + '</option><option value="name">' + L('Nome', 'Nombre') + '</option></select></div>' +
@@ -1964,6 +2005,9 @@ function renderCRM(per) {
   var now = STATE.crm.filter(function (c) { return inRange(c.date, per.from, per.to) && byUtm(c); }),
       prev = STATE.crm.filter(function (c) { return inRange(c.date, per.pFrom, per.pTo) && byUtm(c); });
   var hasStatus = STATE.sources.some(function (x) { return x.tipo === 'crm' && x.status.hasStatus; });
+  var hasQualAny = hasStatus || STATE.sources.some(function (x) { return x.tipo === 'crm' && x.status.qualRule; });
+  var hasSalesAny = STATE.sources.some(function (x) { return x.tipo === 'crm' && x.status.hasSales; });
+  var qualLabel = D.qualificacao && D.qualificacao.rotulo ? D.qualificacao.rotulo : L('Com perfil', 'Con perfil');
 
   // quantos leads do período realmente têm campanha registrada
   function cobUtm() {
@@ -1992,7 +2036,8 @@ function renderCRM(per) {
   var html = filtro + legendHTML(per) +
     '<div class="grid">' + kpi(L('Cadastros recebidos', 'Registros recibidos'), now.length, prev.length, count, false, L('na lista do comercial', 'en la lista de ventas')) +
     kpiSimple(L('Ritmo', 'Ritmo'), perDayTxt(now.length / per.len, L('cadastro', 'registro'), L('cadastros', 'registros')), '', L('antes: ', 'antes: ') + perDayTxt(prev.length / per.pLen, L('cadastro', 'registro'), L('cadastros', 'registros')));
-  if (hasStatus) html += kpi(L('Com perfil', 'Con perfil'), now.filter(function (c) { return c.qual; }).length, prev.filter(function (c) { return c.qual; }).length, count) + kpi(L('Viraram venda', 'Se convirtieron en venta'), now.filter(function (c) { return c.sale; }).length, prev.filter(function (c) { return c.sale; }).length, count);
+  if (hasQualAny) html += kpi(qualLabel, now.filter(function (c) { return c.qual; }).length, prev.filter(function (c) { return c.qual; }).length, count);
+  if (hasSalesAny) html += kpi(L('Viraram venda', 'Se convirtieron en venta'), now.filter(function (c) { return c.sale; }).length, prev.filter(function (c) { return c.sale; }).length, count);
   html += '</div>';
   if (!now.length) html += '<div class="card empty" style="margin-top:12px">' + L('Nenhum cadastro no período selecionado.', 'Ningún registro en el período.') + '</div>';
   else {
@@ -2002,7 +2047,7 @@ function renderCRM(per) {
     order.forEach(function (k) {
       if (!campoPermitido(k)) return;
       var counts = {}, answered = 0;
-      fields[k].forEach(function (x) { var t = String(x == null ? '' : x).trim(); if (valorVazio(t) || (parseDate(t) && /\d{4}|\d\/\d/.test(t))) return; t = pretty(t); answered++; counts[t] = (counts[t] || 0) + 1; });
+      fields[k].forEach(function (x) { var t = String(x == null ? '' : x).trim(); if (valorVazio(t) || (parseDate(t) && /\d{4}|\d\/\d/.test(t))) return; t = respostaNormalizada(k, t) || pretty(t); answered++; counts[t] = (counts[t] || 0) + 1; });
       var e = Object.keys(counts).map(function (x) { return [x, counts[x]]; }).sort(function (a, b) { return b[1] - a[1]; });
       /* Independente do nome da coluna: se as respostas são links, identificadores
          numéricos longos ou textos enormes, não é uma pergunta de perfil. */
@@ -2028,7 +2073,7 @@ function renderCRM(per) {
     });
     if (charts) html += '<div class="sec">' + L('O que as pessoas responderam', 'Lo que respondieron') + '</div><div class="grid g2">' + charts + '</div>';
   }
-  if (!hasStatus) html = whyAlertHTML(['cadastro'], per) + html;
+  if (!hasQualAny) html = whyAlertHTML(['cadastro'], per) + html;
   v.innerHTML = html;
   $$('select[data-utm]', v).forEach(function (b) { b.onchange = function () { STATE.crmUtm = b.value === 'all' ? null : b.value; renderCRM(per); enhanceTables(); reportHeight(); }; });
   bindWhy(v);
@@ -2076,7 +2121,7 @@ function renderPace() {
       var sA = agg(STATE.rows.filter(function (r) { return r.account === a && inRange(r.date, ms, end); })).spend;
       var bA = +budgets[a] || 0, avgA = sA / days, projA = sA + avgA * left;
       var share = gastoTotal > 0 ? sA / gastoTotal : 0;
-      html += '<div style="border-top:1px solid var(--bd);padding-top:12px;margin-top:12px"><div class="bar"><h3>' + (accts[a] === 'google' ? 'Google · ' : 'Meta · ') + esc(a) + '</h3>' +
+      html += '<div style="border-top:1px solid var(--bd);padding-top:12px;margin-top:12px"><div class="bar"><h3>' + (platCurto(accts[a]) + ' · ') + esc(a) + '</h3>' +
         '<label class="mut" style="font-size:12.5px">' + L('Verba desta conta', 'Inversión de esta cuenta') + ' <input type="number" data-b="' + esc(a) + '" value="' + (bA || '') + '" style="width:110px"></label></div>' +
         '<div class="grid">' + kpiSimple(L('Gasto no mês', 'Gastado en el mes'), money(sA), '', per100(share) + L('% do total', '% del total')) +
         kpiSimple(L('Média por dia', 'Promedio por día'), money(avgA)) +
@@ -2360,7 +2405,7 @@ function syncBar(per) {
   var plats = {}; STATE.rows.forEach(function (r) { plats[r.platform] = 1; });
   var pl = Object.keys(plats);
   $('#dzPlat').style.display = pl.length > 1 ? '' : 'none';
-  $('#dzPlat').innerHTML = '<option value="all">' + L('Todas as plataformas', 'Todas las plataformas') + '</option>' + pl.map(function (p) { return '<option value="' + p + '"' + (STATE.plat === p ? ' selected' : '') + '>' + (p === 'google' ? 'Google Ads' : 'Meta Ads') + '</option>'; }).join('');
+  $('#dzPlat').innerHTML = '<option value="all">' + L('Todas as plataformas', 'Todas las plataformas') + '</option>' + pl.map(function (p) { return '<option value="' + p + '"' + (STATE.plat === p ? ' selected' : '') + '>' + platNome(p) + '</option>'; }).join('');
   var ac = {}; STATE.rows.forEach(function (r) { if (STATE.plat === 'all' || r.platform === STATE.plat) ac[r.account] = 1; });
   var al = Object.keys(ac).sort();
   $('#dzAcct').style.display = al.length > 1 ? '' : 'none';
